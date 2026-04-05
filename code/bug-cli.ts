@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Bug tracker CLI for gaia-bot development.
+ * Bug tracker CLI for persona-bot development.
  *
  * Usage:
  *   npx tsx bug-cli.ts report "标题" -s P1 -c pipeline -d "描述"
@@ -50,7 +50,7 @@ function now(): string {
 
 function appendLog(text: string): void {
   if (!existsSync(LOG_PATH)) {
-    writeFileSync(LOG_PATH, '# Gaia-bot Bug Log\n\n', 'utf-8');
+    writeFileSync(LOG_PATH, '# Persona-bot Bug Log\n\n', 'utf-8');
   }
   appendFileSync(LOG_PATH, text, 'utf-8');
 }
@@ -163,7 +163,7 @@ function summary(): void {
 function exportReport(): void {
   const rows = db.prepare('SELECT * FROM bugs ORDER BY id DESC').all() as Array<Record<string, unknown>>;
   const lines = [
-    '# Gaia-bot 缺陷跟踪报告',
+    '# Persona-bot 缺陷跟踪报告',
     '',
     `生成时间：${now()}`,
     '',

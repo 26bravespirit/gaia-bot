@@ -95,12 +95,22 @@ export async function callLLM(messages: LLMMessage[]): Promise<LLMResponse> {
       return { text, model, modelIndex: i };
     } catch (err) {
       if (err instanceof Error && err.message === lastError) throw err;
-      lastError = `LLM error: ${err}`;
+
+      // Distinguish timeout from other network errors
+      const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+      lastError = isTimeout
+        ? `LLM timeout after 60s (model=${model})`
+        : `LLM error (model=${model}): ${err}`;
+
       if (i < models.length - 1) {
         logger.warn(`Model ${model} failed, trying next`, { error: lastError });
         continue;
       }
-      throw new Error(lastError);
+      throw new Error(
+        models.length > 1
+          ? `All ${models.length} LLM models failed. Last: ${lastError}`
+          : lastError
+      );
     }
   }
 

@@ -1,6 +1,7 @@
 import { resolve } from 'path';
 import { loadEnv } from './utils/env.js';
 import { logger } from './utils/logger.js';
+import { acquirePidLock, releasePidLock } from './utils/pid-lock.js';
 import { loadPersona, watchPersona, getPersona } from './config/persona-loader.js';
 import { MemoryManager } from './memory/memory-manager.js';
 import { TimeEngine } from './engine/time-engine.js';
@@ -9,11 +10,14 @@ import { eventBus } from './engine/event-bus.js';
 import { LarkClient } from './lark/lark-client.js';
 import { buildChannelManagerFromEnv } from './lark/channel-manager.js';
 import type { LarkMessage } from './lark/lark-client.js';
+import { ProactiveInitiator } from './engine/proactive-initiator.js';
 import { PipelineRunner } from './pipeline/pipeline-runner.js';
 import { S1MessageDispatcher } from './pipeline/s1-message-dispatcher.js';
 import { S2ContextAssembler } from './pipeline/s2-context-assembler.js';
 import { S3S4CognitiveGenerator } from './pipeline/s3s4-cognitive-generator.js';
 import { S45BiographicalExtractor } from './pipeline/s4-5-biographical-extractor.js';
+import { S46MemoryExtractor } from './pipeline/s4-6-memory-extractor.js';
+import { ExtractionScheduler } from './pipeline/extraction-scheduler.js';
 import { S5PerceptionWrapper } from './pipeline/s5-perception-wrapper.js';
 import { S55AntiAiValidator } from './pipeline/s5-5-anti-ai-validator.js';
 import { S6OutboundScheduler } from './pipeline/s6-outbound-scheduler.js';
@@ -22,6 +26,9 @@ import type { Message } from './memory/immediate-memory.js';
 // ── Load environment ──
 const rootDir = resolve(import.meta.dirname || '.', '..');
 loadEnv(resolve(rootDir, '.env'));
+
+// ── Single instance lock — kill old instance if running ──
+acquirePidLock();
 
 // ── Load persona config ──
 const personaPath = resolve(rootDir, process.env.PERSONA_CONFIG || 'persona.yaml');
@@ -46,17 +53,41 @@ watchPersona(personaPath, (updated) => {
 const pipeline = new PipelineRunner();
 pipeline.addStage(new S1MessageDispatcher());
 pipeline.addStage(new S2ContextAssembler(memory, timeEngine, () => config));
-pipeline.addStage(new S3S4CognitiveGenerator());
-pipeline.addStage(new S45BiographicalExtractor(memory));
+pipeline.addStage(new S3S4CognitiveGenerator(memory));
+const extractionScheduler = new ExtractionScheduler(memory);
+pipeline.addStage(new S45BiographicalExtractor(memory, extractionScheduler));
+pipeline.addStage(new S46MemoryExtractor(memory, extractionScheduler));
 pipeline.addStage(new S5PerceptionWrapper(guardian, memory));
 pipeline.addStage(new S55AntiAiValidator());
 pipeline.addStage(new S6OutboundScheduler(lark, memory));
+
+// ── Persist events to SQLite event_log ──
+for (const evtType of ['message_received', 'response_sent', 'error', 'persona_reloaded'] as const) {
+  eventBus.subscribe(evtType, (event) => {
+    memory.logEvent(event.type, 'system', event.payload);
+  });
+}
+
+// ── Update self_state after each interaction ──
+eventBus.subscribe('response_sent', (event) => {
+  const selfState = memory.getSelfState();
+  // Decrease social battery slightly per interaction
+  const newBattery = Math.max(0.1, selfState.socialBattery - 0.02);
+  memory.updateSelfState({ socialBattery: newBattery });
+});
 
 // ── Message handler shared across all channels ──
 async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
   // Dedup
   if (memory.isSeen(msg.messageId)) return;
   memory.markSeen(msg.messageId);
+
+  // Check if this channel is enabled via runtime_config
+  const channelEnabled = memory.getRuntimeConfig('channel_feishu_enabled');
+  if (channelEnabled === 'false') {
+    logger.debug('Channel feishu disabled, skipping message');
+    return;
+  }
 
   // Record user message in memory
   const userMsg: Message = {
@@ -102,7 +133,7 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
 
 // ── Main ──
 async function main() {
-  logger.info(`gaia-bot starting: ${config.meta.name}`);
+  logger.info(`persona-bot starting: ${config.meta.name}`);
 
   // Build channel manager from env config
   const channelManager = buildChannelManagerFromEnv();
@@ -117,18 +148,60 @@ async function main() {
     logger.info(`channel ${appId}: status=${state.status}, pid=${state.subscribePid}`);
   }
 
-  // Graceful shutdown
+  // Proactive behavior (Phase 6): check every 10 minutes
+  const proactive = new ProactiveInitiator(() => config, memory, timeEngine);
+  const proactiveInterval = setInterval(() => {
+    const msg = proactive.check();
+    if (msg) {
+      const channel = channelManager.getDefaultChannel();
+      if (channel) {
+        channel.sendText(msg.chatId, msg.text);
+        memory.addMessage({
+          id: `proactive_${Date.now()}`,
+          role: 'assistant',
+          content: msg.text,
+          senderName: config.meta.name,
+          senderId: process.env.BOT_OPEN_ID || 'bot',
+          timestamp: Date.now(),
+          chatId: msg.chatId,
+        });
+        logger.info(`proactive: sent "${msg.text}" to ${msg.userId}`);
+      }
+    }
+  }, 10 * 60_000);
+
+  // Health heartbeat (every 5 minutes)
+  const healthInterval = setInterval(() => {
+    const snap = channelManager.getSnapshot();
+    const states: string[] = [];
+    for (const [id, state] of snap) {
+      states.push(`${id}:${state.status}`);
+    }
+    const selfState = memory.getSelfState();
+    const evtCount = memory.eventCount();
+    logger.info(
+      `health: channels=[${states.join(', ')}] ` +
+      `self={mood=${selfState.moodBaseline.toFixed(2)}, energy=${selfState.energyLevel}, battery=${selfState.socialBattery.toFixed(2)}} ` +
+      `events=${evtCount}`
+    );
+  }, 5 * 60_000);
+
+  // Graceful shutdown — clean up everything including child process tree
   const shutdown = async () => {
     logger.info('Shutting down...');
+    clearInterval(proactiveInterval);
+    clearInterval(healthInterval);
+    await extractionScheduler.shutdown();
     await channelManager.shutdown();
     memory.close();
+    releasePidLock();
     process.exit(0);
   };
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  logger.info('gaia-bot is running');
+  logger.info('persona-bot is running');
 }
 
 main().catch((err) => {

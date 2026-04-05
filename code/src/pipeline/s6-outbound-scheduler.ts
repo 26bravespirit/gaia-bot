@@ -18,20 +18,33 @@ export class S6OutboundScheduler implements PipelineStage {
       return ctx;
     }
 
-    // Apply response delay for more natural feel
+    // Split multi-paragraph response into separate messages (like a real person)
+    const segments = this.splitIntoMessages(ctx.finalResponse);
+
+    // Apply initial response delay
     const delay = ctx.timeState?.replyDelayMs ?? 1000;
     await new Promise(resolve => setTimeout(resolve, Math.min(delay, 3000)));
 
-    // Send via Lark
-    const msgId = this.lark.sendText(ctx.rawChatId, ctx.finalResponse);
+    // Send each segment as a separate message
+    const sentIds: string[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      if (i > 0) {
+        // Typing delay between messages: 500-1500ms based on segment length
+        const typingDelay = Math.min(500 + segments[i].length * 15, 1500);
+        await new Promise(resolve => setTimeout(resolve, typingDelay));
+      }
 
-    if (msgId) {
-      ctx.deliveryMessageId = msgId;
+      const msgId = this.lark.sendText(ctx.rawChatId, segments[i]);
+      if (msgId) sentIds.push(msgId);
+    }
+
+    if (sentIds.length > 0) {
+      ctx.deliveryMessageId = sentIds[0];
       ctx.deliveryStatus = 'sent';
 
-      // Record bot response in memory (use the user's ID so it pairs with their messages in conversation_log)
+      // Record full response in memory as one entry
       this.memory.addMessage({
-        id: msgId,
+        id: sentIds[0],
         role: 'assistant',
         content: ctx.finalResponse,
         senderName: ctx.config.meta.name,
@@ -41,19 +54,46 @@ export class S6OutboundScheduler implements PipelineStage {
       });
 
       eventBus.publish('response_sent', {
-        messageId: msgId,
+        messageId: sentIds[0],
         chatId: ctx.rawChatId,
         userId: ctx.rawSenderId,
         model: ctx.selectedModel,
         responseLength: ctx.finalResponse.length,
       });
 
-      logger.info(`S6: sent (len=${ctx.finalResponse.length}, model=${ctx.selectedModel})`);
+      logger.info(`S6: sent ${segments.length} msg(s) (len=${ctx.finalResponse.length}, model=${ctx.selectedModel})`);
     } else {
       ctx.deliveryStatus = 'failed';
       logger.error('S6: delivery failed');
     }
 
     return ctx;
+  }
+
+  /**
+   * Split response into separate messages at paragraph breaks.
+   * Real people send multiple short messages, not one long block.
+   */
+  private splitIntoMessages(text: string): string[] {
+    // Split on double newlines (paragraph breaks)
+    const paragraphs = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 0);
+
+    // If only 1 paragraph or very short, send as-is
+    if (paragraphs.length <= 1) return [text.trim()];
+
+    // Merge very short consecutive paragraphs (< 15 chars) into one message
+    const merged: string[] = [];
+    let buffer = '';
+    for (const p of paragraphs) {
+      if (buffer && p.length < 15 && buffer.length < 60) {
+        buffer += '\n' + p;
+      } else {
+        if (buffer) merged.push(buffer);
+        buffer = p;
+      }
+    }
+    if (buffer) merged.push(buffer);
+
+    return merged;
   }
 }

@@ -9,7 +9,7 @@ OpenClaw 的核心设计：**单进程 Gateway + 多 Channel Plugin + 多 Accoun
 ## 现状问题
 
 ```
-问题 1: gaia-bot 和 GGBot 共用 app cli_a9470826ebf9dcb2，互斥
+问题 1: persona-bot 和 GGBot 共用 app cli_a9470826ebf9dcb2，互斥
 问题 2: lark-bot-worker 用 launchd KeepAlive=true，kill 后自动复活
 问题 3: 手动 launchctl unload 不可持续，重启/登录后 plist 重新加载
 问题 4: 无重连机制，lark-cli subscribe 断开后整个 bot 退出
@@ -18,7 +18,7 @@ OpenClaw 的核心设计：**单进程 Gateway + 多 Channel Plugin + 多 Accoun
 ## 架构：单进程 + 多 App Channel Manager
 
 ```
-gaia-bot (单进程)
+persona-bot (单进程)
 │
 ├── ChannelManager                        ← 借鉴 OpenClaw server-channels.ts
 │   │
@@ -47,9 +47,9 @@ gaia-bot (单进程)
 
 ### 与 OpenClaw 的对应关系
 
-| OpenClaw 概念 | gaia-bot 对应 | 说明 |
+| OpenClaw 概念 | persona-bot 对应 | 说明 |
 |---|---|---|
-| Gateway | gaia-bot 主进程 | 单进程控制平面 |
+| Gateway | persona-bot 主进程 | 单进程控制平面 |
 | Channel Plugin | LarkChannel | 每个 lark app 是一个 channel |
 | Account | app ID + LARK_HOME | 每个 app 配置独立隔离 |
 | startAccount() | subscribe() 子进程 | 长生命周期，监听消息 |
@@ -198,7 +198,7 @@ class ConflictResolver {
 
 ```env
 # 服务标识
-SERVICE_NAME=gaia-bot
+SERVICE_NAME=persona-bot
 
 # 多 app 配置（JSON）
 LARK_CHANNELS=[{"appId":"cli_a9470826ebf9dcb2","larkHome":"/Users/shiyangcui/.local/share/GGBot/home","chatFilter":["oc_4600984a60e6dfea595b886f5c876104"]}]
@@ -212,7 +212,7 @@ LARK_CHANNELS=[{"appId":"cli_a9470826ebf9dcb2","larkHome":"/Users/shiyangcui/.lo
 // ecosystem.config.cjs
 module.exports = {
   apps: [{
-    name: 'gaia-bot',
+    name: 'persona-bot',
     script: 'dist/index.js',
     cwd: __dirname,
     max_restarts: 5,
@@ -220,14 +220,14 @@ module.exports = {
     kill_timeout: 10000,
     env: {
       NODE_ENV: 'production',
-      SERVICE_NAME: 'gaia-bot',
+      SERVICE_NAME: 'persona-bot',
       PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
     }
   }]
 };
 ```
 
-pm2 只管 gaia-bot 主进程。lark-cli subscribe 子进程的重连由 ChannelManager 内部处理。
+pm2 只管 persona-bot 主进程。lark-cli subscribe 子进程的重连由 ChannelManager 内部处理。
 
 ## 文件变更清单
 

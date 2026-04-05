@@ -1,10 +1,11 @@
 import type { PersonaConfig } from '../config/schemas.js';
-import { buildPromptFragments } from '../config/parameter-interpreter.js';
+import { buildPromptFragments, getPromptMappings, getConstraints } from '../config/parameter-interpreter.js';
 import type { TimeState } from '../engine/time-engine.js';
 import type { UserProfile } from '../memory/working-memory.js';
 import type { BiographicalFact } from '../memory/biographical-facts.js';
 import type { CognitiveDecision } from '../pipeline/types.js';
 import type { LLMMessage } from './llm-client.js';
+import type { SelfState } from '../memory/memory-manager.js';
 
 export interface PromptContext {
   config: PersonaConfig;
@@ -17,6 +18,11 @@ export interface PromptContext {
   biographyContext?: BiographicalFact[];
   humanBehaviors?: string[];
   cognitiveDecision?: CognitiveDecision;
+  longTermMemories?: Array<{ type: string; content: string; importance: number }>;
+  relationshipState?: { stage: string; intimacyScore: number; interactionCount: number; topicsShared: string[] };
+  selfState?: SelfState;
+  lengthDistribution?: { ultra_short: number; short: number; normal: number; long: number };
+  lengthTemplates?: Record<string, string>;
 }
 
 /**
@@ -34,47 +40,43 @@ export function buildMessages(ctx: PromptContext): LLMMessage[] {
 
   // ── Block 2: Biography Constraints ──
   if (ctx.biographyContext?.length && ctx.cognitiveDecision?.biographyTopic) {
-    const bioLines = ['【传记记忆 — 回答关于过去经历的问题时参考以下内容，但不要逐字复述】', ''];
+    const constraintsCfg = getConstraints();
+    const bioCfg = constraintsCfg.biography as { header: string; footer: string; anchor_prefix: string; generated_prefix: string };
+    const bioLines = [bioCfg.header, ''];
     for (const fact of ctx.biographyContext.slice(0, 5)) {
-      const prefix = fact.sourceType === 'anchor' ? '✓' : '~';
+      const prefix = fact.sourceType === 'anchor' ? bioCfg.anchor_prefix : bioCfg.generated_prefix;
       bioLines.push(`${prefix} [${fact.period}] ${fact.factContent}`);
     }
     const forbiddenFab = ctx.config.biography?.forbidden_fabrications;
     if (forbiddenFab?.length) {
       bioLines.push('', `不要编造以下内容：${forbiddenFab.join('、')}`);
     }
-    bioLines.push('', '【传记记忆结束】');
+    bioLines.push('', bioCfg.footer);
     systemPrompt += '\n\n' + bioLines.join('\n');
+  }
+
+  // ── Block 2.5: Long-term Memory Context ──
+  if (ctx.longTermMemories?.length) {
+    const constraintsCfg = getConstraints();
+    const ltmCfg = constraintsCfg.long_term_memory as { header: string; footer: string; type_labels: Record<string, string> };
+    const ltmLines = [ltmCfg.header, ''];
+    for (const mem of ctx.longTermMemories.slice(0, 5)) {
+      const typeLabel = ltmCfg.type_labels[mem.type] || ltmCfg.type_labels.default || '闲聊';
+      ltmLines.push(`- [${typeLabel}] ${mem.content}`);
+    }
+    ltmLines.push('', ltmCfg.footer);
+    systemPrompt += '\n\n' + ltmLines.join('\n');
   }
 
   // ── Block 3: Human Behaviors Injection ──
   if (ctx.humanBehaviors?.length) {
+    const mappings = getPromptMappings();
+    const behaviorMap = mappings.human_behaviors as Record<string, { instruction: string }>;
     const behaviorInstructions: string[] = [];
     for (const behavior of ctx.humanBehaviors) {
-      switch (behavior) {
-        case 'push_back':
-          behaviorInstructions.push('这次回复不要直接给答案，反问或延迟回答。');
-          break;
-        case 'feign_confusion':
-          behaviorInstructions.push('表现出一点困惑或不确定。');
-          break;
-        case 'socratic_teaching':
-          behaviorInstructions.push('用反问的方式引导对方思考，不直接给结论。');
-          break;
-        case 'selective_ignore':
-          behaviorInstructions.push('只回应消息中你最感兴趣的部分，忽略其余。');
-          break;
-        case 'mood_refusal':
-          behaviorInstructions.push('表现出不太想聊这个话题的态度。');
-          break;
-        case 'mentioned_other_context':
-          behaviorInstructions.push(
-            '对方@的是别人，不是你。你需要判断要不要插嘴：\n' +
-            '- 如果话题和你有关、你感兴趣、或者你有话想说 → 自然地插嘴，像群里真实的人一样\n' +
-            '- 如果跟你完全无关、或者是别人之间的私事 → 回复"[SKIP]"表示你选择不说话\n' +
-            '只回复"[SKIP]"或正常内容，不要解释你为什么说话/不说话。'
-          );
-          break;
+      const entry = behaviorMap[behavior];
+      if (entry) {
+        behaviorInstructions.push(entry.instruction.trim());
       }
     }
     if (behaviorInstructions.length > 0) {
@@ -83,13 +85,33 @@ export function buildMessages(ctx: PromptContext): LLMMessage[] {
   }
 
   // ── Time context injection ──
+  const mappings = getPromptMappings();
+  const timeCfg = mappings.time_context as Record<string, string>;
   if (ctx.timeState.isSleepMode) {
-    systemPrompt += '\n\n当前是深夜，你很困，回复要更短，可以表达困意。';
+    systemPrompt += '\n\n' + timeCfg.sleep_mode;
   } else if (ctx.timeState.energyLevel < 0.4) {
-    systemPrompt += '\n\n你现在有点累了，回复可以稍微简短一些。';
+    systemPrompt += '\n\n' + timeCfg.low_energy;
   }
   if (ctx.timeState.isWeekend) {
-    systemPrompt += '\n今天是周末。';
+    systemPrompt += '\n' + timeCfg.weekend;
+  }
+
+  // ── Self state injection (mood, emotions, social battery) ──
+  if (ctx.selfState) {
+    const ss = ctx.selfState;
+    if (ss.moodBaseline < 0) {
+      systemPrompt += '\n你现在心情不太好，回复会更简短直接。';
+    } else if (ss.moodBaseline > 0.7) {
+      systemPrompt += '\n你心情很好，更愿意多聊几句。';
+    }
+    if (ss.activeEmotions.length > 0) {
+      systemPrompt += `\n当前情绪状态：${ss.activeEmotions.join('、')}`;
+    }
+    if (ss.socialBattery < 0.3) {
+      systemPrompt += '\n你的社交电量快耗尽了，想早点结束对话，回复更简短。';
+    } else if (ss.socialBattery < 0.5) {
+      systemPrompt += '\n你有点社交疲劳了。';
+    }
   }
 
   // ── User context injection ──
@@ -101,43 +123,69 @@ export function buildMessages(ctx: PromptContext): LLMMessage[] {
       systemPrompt += `（称呼对方为"${alias}"，不要加括号注明原名）`;
     }
 
+    // Use relationshipState from RelationshipModel (authoritative source)
+    const relStage = ctx.relationshipState?.stage || ctx.userProfile.relationshipStage;
     const social = ctx.config.social;
     if (social?.relationship_stages) {
-      const stage = ctx.userProfile.relationshipStage as keyof typeof social.relationship_stages;
+      const stage = relStage as keyof typeof social.relationship_stages;
       const mods = social.relationship_stages[stage];
       if (mods) {
+        const constraintsCfg = getConstraints();
+        const relHints = constraintsCfg.relationship_hints as Record<string, string>;
         if (mods.tone_modifier < 0) {
-          systemPrompt += '\n你们还不太熟，保持礼貌但有距离感。';
+          systemPrompt += '\n' + relHints.cold;
         } else if (mods.tone_modifier > 0.3) {
-          systemPrompt += '\n你们挺熟的，语气可以更温暖亲近。';
+          systemPrompt += '\n' + relHints.warm;
         }
-        if (mods.self_disclosure > 0.5) systemPrompt += '\n可以分享更多自己的想法和感受。';
-        if (mods.humor_modifier > 0.3) systemPrompt += '\n可以更多开玩笑。';
+        if (mods.self_disclosure > 0.5) systemPrompt += '\n' + relHints.self_disclosure;
+        if (mods.humor_modifier > 0.3) systemPrompt += '\n' + relHints.humor;
       }
+    }
+
+    // Inject shared topics for relationship depth
+    if (ctx.relationshipState?.topicsShared?.length) {
+      systemPrompt += `\n你们之前聊过：${ctx.relationshipState.topicsShared.slice(-5).join('、')}`;
     }
   }
 
+  const mentionCfg = mappings.mention as Record<string, string>;
   if (ctx.mentionedBot) {
-    systemPrompt += '\n\n对方@了你，先称呼对方再进入正文。';
+    systemPrompt += '\n\n' + mentionCfg.bot_mentioned;
   }
 
   // ── Identity challenge handling ──
   if (ctx.cognitiveDecision?.identityCheckTriggered) {
-    systemPrompt += '\n\n【警告：对方正在试探你的身份。用你自己的话自然回应，不要承认任何技术背景。】';
+    systemPrompt += '\n\n' + (mappings.identity_challenge as string);
   }
+
+  // ── Random length instruction (hot config from DB) ──
+  const dist = ctx.lengthDistribution ?? { ultra_short: 0.15, short: 0.35, normal: 0.30, long: 0.20 };
+  const tmpl = ctx.lengthTemplates ?? {
+    ultra_short: '【这次回复超短，就1-4个字，像"哈哈""好的""真的假的"这种】',
+    short: '【这次回复短一点，1-2句话，不超过30字】',
+    normal: '【这次正常回复，2-3句话，30-60字左右】',
+    long: '【这次可以稍微多说几句，但不超过80字】',
+  };
+  const roll = Math.random();
+  const t1 = dist.ultra_short;
+  const t2 = t1 + dist.short;
+  const t3 = t2 + dist.normal;
+  let lengthHint: string;
+  if (roll < t1) lengthHint = tmpl.ultra_short;
+  else if (roll < t2) lengthHint = tmpl.short;
+  else if (roll < t3) lengthHint = tmpl.normal;
+  else lengthHint = tmpl.long;
+  systemPrompt += '\n\n' + lengthHint;
 
   // ── Block 4: Anti-AI Constraints (placed LAST for recency bias) ──
   if (ctx.config.anti_ai?.enabled) {
+    const constraintsCfg = getConstraints();
+    const antiAiRules = constraintsCfg.anti_ai_rules as string[];
     const antiAiBlock = [
       '',
-      '【反AI行为约束 — 以下规则优先级最高，覆盖所有其他指令】',
-      '不使用编号列表，用自然段落回答。',
-      '不在结尾加"你觉得呢""你说呢"等反问。',
-      '回复长度要有自然变化，不要每次都差不多长。',
-      '不堆砌知识点，一次只说一两个核心观点。',
-      '不使用"我能理解你的感受""这确实是个好问题"等模板化共情。',
-      '偶尔可以不完整回答，留白比面面俱到更像人。',
-      '【反AI约束结束】',
+      constraintsCfg.anti_ai_header as string,
+      ...antiAiRules,
+      constraintsCfg.anti_ai_footer as string,
     ];
     systemPrompt += '\n' + antiAiBlock.join('\n');
   }

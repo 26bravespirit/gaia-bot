@@ -63,6 +63,11 @@ language:
     filler_words: ["嗯", "就"]
 
 temporal:
+  active_hours:
+    start: 8
+    end: 22
+  history_window: 15
+
   state_model:
     sampling_interval_hours: 6
     weekday:
@@ -111,6 +116,12 @@ memory:
     forgetting_expression:
       - "我唔记得了"
       - "印象模糊了"
+
+degradation:
+  templates:
+    default: ["嗯...", "哈哈"]
+    directQuestion: ["让我想想..."]
+    emotional: ["我懂"]
 
 aliases:
   "Ben Cui": "老板"

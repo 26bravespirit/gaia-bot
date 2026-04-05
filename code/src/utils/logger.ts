@@ -11,6 +11,6 @@ export const logger = createLogger({
   ),
   transports: [
     new transports.Console(),
-    new transports.File({ filename: 'logs/gaia-bot.log', maxsize: 5 * 1024 * 1024, maxFiles: 3 }),
+    new transports.File({ filename: 'logs/persona-bot.log', maxsize: 5 * 1024 * 1024, maxFiles: 3 }),
   ],
 });

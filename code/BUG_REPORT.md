@@ -1,4 +1,4 @@
-# Gaia-bot 缺陷跟踪报告
+# Persona-bot 缺陷跟踪报告
 
 生成时间：2026-04-04 11:50:24
 
@@ -19,7 +19,7 @@
 - **解决时间**: 2026-04-04 11:50:17
 - **标签**: 配置,lark-cli
 
-**描述**: gaia-bot用默认HOME启动，但lark-cli config.json在GGBot隔离HOME下
+**描述**: persona-bot用默认HOME启动，但lark-cli config.json在GGBot隔离HOME下
 
 **实际行为**: subscribe进程运行但无法收到消息
 

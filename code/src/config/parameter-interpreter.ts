@@ -1,4 +1,35 @@
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { load as yamlLoad } from 'js-yaml';
 import type { PersonaConfig } from './schemas.js';
+
+// Cache loaded configs
+let _promptMappings: Record<string, unknown> | null = null;
+let _constraints: Record<string, unknown> | null = null;
+
+function getConfigDir(): string {
+  const __filename = fileURLToPath(import.meta.url);
+  return dirname(__filename);
+}
+
+export function getPromptMappings(): Record<string, unknown> {
+  if (!_promptMappings) {
+    const configDir = getConfigDir();
+    const raw = readFileSync(resolve(configDir, 'prompt_mappings.yaml'), 'utf-8');
+    _promptMappings = yamlLoad(raw) as Record<string, unknown>;
+  }
+  return _promptMappings;
+}
+
+export function getConstraints(): Record<string, unknown> {
+  if (!_constraints) {
+    const configDir = getConfigDir();
+    const raw = readFileSync(resolve(configDir, 'constraints.yaml'), 'utf-8');
+    _constraints = yamlLoad(raw) as Record<string, unknown>;
+  }
+  return _constraints;
+}
 
 export interface PromptFragments {
   systemPrompt: string;

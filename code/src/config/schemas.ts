@@ -105,7 +105,14 @@ const ProactiveBehaviorSchema = z.object({
   triggers: z.array(z.string()).default([]),
 });
 
+const ActiveHoursSchema = z.object({
+  start: z.number().min(0).max(23).default(7),
+  end: z.number().min(0).max(23).default(23),
+});
+
 const TemporalSchema = z.object({
+  active_hours: ActiveHoursSchema.optional(),
+  history_window: z.number().min(5).max(100).default(25),
   state_model: StateModelSchema.optional(),
   response_timing: ResponseTimingSchema.optional(),
   proactive_behavior: ProactiveBehaviorSchema.optional(),
@@ -118,6 +125,19 @@ const RelationshipStageSchema = z.object({
 });
 
 const SocialSchema = z.object({
+  stage_thresholds: z.object({
+    stranger: z.number().default(0),
+    acquaintance: z.number().default(0.2),
+    familiar: z.number().default(0.5),
+    intimate: z.number().default(0.8),
+  }).optional(),
+  intimacy_increments: z.object({
+    message: z.number().default(0.005),
+    emotional_event: z.number().default(0.03),
+    shared_experience: z.number().default(0.02),
+    promise_made: z.number().default(0.02),
+    promise_fulfilled: z.number().default(0.05),
+  }).optional(),
   relationship_stages: z.object({
     stranger: RelationshipStageSchema,
     acquaintance: RelationshipStageSchema,
@@ -159,7 +179,22 @@ const BiographyWritebackSchema = z.object({
   min_confidence: z.number().min(0).max(1).default(0.3),
 });
 
+const ConflictThresholdsSchema = z.object({
+  near_duplicate: z.number().min(0).max(1).default(0.9),
+  suspicious: z.number().min(0).max(1).default(0.5),
+  anchor_conflict: z.number().min(0).max(1).default(0.3),
+});
+
+const DegradationSchema = z.object({
+  templates: z.object({
+    default: z.array(z.string()).default(['嗯...', '哈哈', '是嘛', '嗯嗯']),
+    directQuestion: z.array(z.string()).default(['嗯，这是个好问题', '让我想想...', '这个嘛...']),
+    emotional: z.array(z.string()).default(['我听你说，我都在呢', '嗯嗯，我懂', '抱抱']),
+  }).optional(),
+});
+
 const BiographySchema = z.object({
+  conflict_thresholds: ConflictThresholdsSchema.optional(),
   anchors: z.array(BiographyAnchorSchema).default([]),
   forbidden_fabrications: z.array(z.string()).default([]),
   writeback: BiographyWritebackSchema.optional(),
@@ -202,6 +237,7 @@ export const PersonaConfigSchema = z.object({
   memory: MemorySchema.optional(),
   biography: BiographySchema.optional(),
   human_behaviors: HumanBehaviorsSchema.optional(),
+  degradation: DegradationSchema.optional(),
   anti_ai: AntiAiConfigSchema.optional(),
   memory_blur: MemoryBlurConfigSchema.optional(),
   aliases: z.record(z.string()).optional(),

@@ -1,4 +1,5 @@
 import type { PipelineContext, PipelineStage, CognitiveDecision } from './types.js';
+import type { MemoryManager } from '../memory/memory-manager.js';
 import { callLLM } from '../llm/llm-client.js';
 import { buildMessages, type PromptContext } from '../llm/prompt-builder.js';
 import { logger } from '../utils/logger.js';
@@ -12,6 +13,8 @@ const DEGRADATION_TEMPLATES = {
 
 export class S3S4CognitiveGenerator implements PipelineStage {
   name = 'S3S4:CognitiveGenerator';
+
+  constructor(private memory?: MemoryManager) {}
 
   async execute(ctx: PipelineContext): Promise<PipelineContext> {
     if (!ctx.shouldReply) return ctx;
@@ -45,6 +48,11 @@ export class S3S4CognitiveGenerator implements PipelineStage {
       biographyContext: ctx.biographyContext,
       humanBehaviors: ctx.humanBehaviorsTriggered,
       cognitiveDecision: decision,
+      longTermMemories: ctx.longTermMemories,
+      relationshipState: ctx.relationshipState,
+      selfState: ctx.selfState,
+      lengthDistribution: this.memory?.getLengthDistribution(),
+      lengthTemplates: this.memory?.getLengthTemplates(),
     };
 
     const messages = buildMessages(promptCtx);
@@ -131,20 +139,20 @@ export class S3S4CognitiveGenerator implements PipelineStage {
 
   private getDegradationResponse(ctx: PipelineContext): string {
     const text = ctx.rawText;
+    // Use config degradation templates if available, fall back to hardcoded defaults
+    const configTemplates = ctx.config.degradation?.templates;
+    const templates = {
+      default: configTemplates?.default ?? DEGRADATION_TEMPLATES.default,
+      directQuestion: configTemplates?.directQuestion ?? DEGRADATION_TEMPLATES.directQuestion,
+      emotional: configTemplates?.emotional ?? DEGRADATION_TEMPLATES.emotional,
+    };
 
-    // Check for emotional content
     if (/难过|伤心|开心|高兴|生气|害怕|担心/.test(text)) {
-      const templates = DEGRADATION_TEMPLATES.emotional;
-      return templates[Math.floor(Math.random() * templates.length)];
+      return templates.emotional[Math.floor(Math.random() * templates.emotional.length)];
     }
-
-    // Check for direct question
     if (/[？?]/.test(text)) {
-      const templates = DEGRADATION_TEMPLATES.directQuestion;
-      return templates[Math.floor(Math.random() * templates.length)];
+      return templates.directQuestion[Math.floor(Math.random() * templates.directQuestion.length)];
     }
-
-    const templates = DEGRADATION_TEMPLATES.default;
-    return templates[Math.floor(Math.random() * templates.length)];
+    return templates.default[Math.floor(Math.random() * templates.default.length)];
   }
 }

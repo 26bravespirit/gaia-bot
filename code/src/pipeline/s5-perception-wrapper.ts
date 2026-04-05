@@ -90,11 +90,18 @@ export class S5PerceptionWrapper implements PipelineStage {
       }
     }
 
-    // R02: Tail Question Remover
+    // R02: Tail Question Remover — catch ALL trailing guiding questions
     const tailQuestionPatterns = [
-      /[，,\s]*(你(觉得|说|看)?呢[？?]?)$/,
+      /[，,\s]*(你(觉得|说|看|认为)?呢[？?]?)$/,
       /[，,\s]*(对吧[？?]?)$/,
-      /[，,\s]*(你(有|想|要).*吗[？?]?)$/,
+      /[，,\s]*(你(有|想|要|会|能|敢|愿意).*[吗嘛么][？?]?)$/,
+      /[，,\s]*(想(试试|聊聊|了解|知道|看看).*[吗嘛么？?]?)$/,
+      /[，,\s]*(要不要.*[？?]?)$/,
+      /[，,\s]*(有兴趣[吗嘛么]?[？?]?)$/,
+      /[，,\s]*(好奇[吗嘛么]?[？?]?)$/,
+      /[，,\s]*(怎么样[？?]?)$/,
+      /[，,\s]*(如何[？?]?)$/,
+      /[，,\s]*(感兴趣[吗嘛么]?[？?]?)$/,
     ];
     for (const p of tailQuestionPatterns) {
       if (p.test(result)) {
@@ -122,15 +129,16 @@ export class S5PerceptionWrapper implements PipelineStage {
       }
     }
 
-    // R04: Length Enforcer — avoid suspiciously round lengths
+    // R04: Length Safety Net — only truncate extreme outliers
+    // Normal length control is done probabilistically in prompt-builder
     const targetLen = ctx.config.language.base_style.avg_message_length;
-    if (result.length > targetLen * 1.8) {
+    if (result.length > targetLen * 3) {
       const originalText = result;
       // Truncate at a natural break point
-      const sentences = result.split(/(?<=[。！？!?])/);
+      const sentences = result.split(/(?<=[。！？!?\n])/);
       let truncated = '';
       for (const s of sentences) {
-        if (truncated.length + s.length > targetLen * 1.5) break;
+        if (truncated.length + s.length > targetLen * 2) break;
         truncated += s;
       }
       if (truncated.length > 10) {

@@ -12,7 +12,7 @@ describe('MemoryManager', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'gaia-bot-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'persona-bot-test-'));
     const config = loadPersona(resolve(import.meta.dirname, '../fixtures/test-persona.yaml'));
     mm = new MemoryManager(config, join(tmpDir, 'test.db'));
   });

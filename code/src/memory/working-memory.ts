@@ -132,8 +132,20 @@ export class WorkingMemory {
         updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
       );
 
+      -- Runtime hot config (modifiable without restart)
+      CREATE TABLE IF NOT EXISTS runtime_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+
       -- Initialize self_state singleton
       INSERT OR IGNORE INTO self_state (id, mood_baseline, energy_level) VALUES (1, 0.6, 'normal');
+
+      -- Initialize default length distribution
+      INSERT OR IGNORE INTO runtime_config (key, value) VALUES
+        ('length_distribution', '{"ultra_short":0.15,"short":0.35,"normal":0.30,"long":0.20}'),
+        ('length_templates', '{"ultra_short":"【这次回复超短，就1-4个字，像\\"哈哈\\"\\"好的\\"\\"真的假的\\"这种】","short":"【这次回复短一点，1-2句话，不超过30字】","normal":"【这次正常回复，2-3句话，30-60字左右】","long":"【这次可以稍微多说几句，但不超过80字】"}');
 
       CREATE INDEX IF NOT EXISTS idx_conv_user_ts ON conversation_log(user_id, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_events_user ON important_events(user_id, created_at DESC);
@@ -241,6 +253,19 @@ export class WorkingMemory {
 
   markSeen(messageId: string): void {
     this.db.prepare('INSERT OR IGNORE INTO dedup (message_id, processed_at) VALUES (?, ?)').run(messageId, Date.now());
+  }
+
+  // ── Runtime Config ──
+
+  getRuntimeConfig(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM runtime_config WHERE key = ?').get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setRuntimeConfig(key: string, value: string): void {
+    this.db.prepare(
+      'INSERT INTO runtime_config (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?'
+    ).run(key, value, Date.now(), value, Date.now());
   }
 
   getDb(): Database.Database {

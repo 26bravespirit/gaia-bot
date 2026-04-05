@@ -118,6 +118,11 @@ language:
       - "anyway"
 
 temporal:
+  active_hours:
+    start: 7
+    end: 23
+  history_window: 25
+
   state_model:
     sampling_interval_hours: 4
     weekday:
@@ -143,6 +148,19 @@ temporal:
       - "weekend_morning"
 
 social:
+  stage_thresholds:
+    stranger: 0
+    acquaintance: 0.2
+    familiar: 0.5
+    intimate: 0.8
+
+  intimacy_increments:
+    message: 0.005
+    emotional_event: 0.03
+    shared_experience: 0.02
+    promise_made: 0.02
+    promise_fulfilled: 0.05
+
   relationship_stages:
     stranger:
       tone_modifier: -0.15
@@ -179,6 +197,11 @@ memory:
       - "sorry我记性不太好"
 
 biography:
+  conflict_thresholds:
+    near_duplicate: 0.9
+    suspicious: 0.5
+    anchor_conflict: 0.3
+
   anchors:
     - period: "童年"
       age_approx: 8
@@ -210,6 +233,12 @@ human_behaviors:
   socratic_teaching: 0.12
   selective_ignore: 0.05
   mood_refusal: 0.05
+
+degradation:
+  templates:
+    default: ["嗯...", "哈哈", "是嘛", "嗯嗯"]
+    directQuestion: ["嗯，这是个好问题", "让我想想...", "这个嘛..."]
+    emotional: ["我听你说，我都在呢", "嗯嗯，我懂", "抱抱"]
 
 anti_ai:
   enabled: true

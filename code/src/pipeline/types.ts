@@ -2,6 +2,7 @@ import type { PersonaConfig } from '../config/schemas.js';
 import type { TimeState } from '../engine/time-engine.js';
 import type { UserProfile } from '../memory/working-memory.js';
 import type { Message } from '../memory/immediate-memory.js';
+import type { SelfState } from '../memory/memory-manager.js';
 import type { BiographicalFact } from '../memory/biographical-facts.js';
 
 // ── S5 Sub-pipeline types ──
@@ -65,6 +66,9 @@ export interface PipelineContext {
   timeState: TimeState;
   resolvedSenderName: string;
   biographyContext?: BiographicalFact[];
+  longTermMemories?: Array<{ type: string; content: string; importance: number }>;
+  relationshipState?: { stage: string; intimacyScore: number; interactionCount: number; topicsShared: string[] };
+  selfState?: SelfState;
 
   // S3+S4: Generated response
   generatedResponse: string;
