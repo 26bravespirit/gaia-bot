@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.db
+logs/*.log
+.env
+.DS_Store
+.pnpmrc.json
+reference/
+data/
+checkpoints/

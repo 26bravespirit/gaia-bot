@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Runtime data
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/bot.log
+data/bugs.db
+logs/
+checkpoints/
+nohup.out
+
+# Reference implementations (too large)
+code/reference/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
