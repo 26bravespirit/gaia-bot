@@ -1,251 +1,149 @@
-# Gaia Bot
+# Gaia-Bot
 
-**Persona-Driven Ontological Chatbot Entity for Lark/Feishu**
+> 人格驱动的飞书/Lark 聊天机器人框架
+>
+> 让你的 bot 拥有独立人格、长期记忆、情绪变化，像真人一样聊天
 
-Gaia is a persona chatbot that maintains a consistent, human-like identity across conversations. She is designed to pass as a real person — not a helpful assistant — with biographical memory, anti-AI speech patterns, emotional authenticity, and contextual awareness.
+## 特性
 
-> **Design documents**: See [gaia-design](https://github.com/26bravespirit/gaia-design) for architecture specs, MVP plans, and version history.
+- 🧠 8 阶段处理管道 — 从消息接收到拟人化回复
+- 💾 多层记忆系统 — 即时/工作/长期/传记/关系五层记忆
+- 😊 动态情绪 — 心情随时间和对话变化，影响回复风格
+- 🛡️ 反 AI 检测 — 8 维指纹分析 + 6 条行为规则，不像 AI
+- 🔧 热配置 — persona.yaml 修改即生效，无需重启
+- 📊 Web 控制面板 — localhost:3456 可视化管理
+- 🔄 双通道支持 — 飞书 + Lark 同时运行互不干扰
 
----
-
-## Architecture Overview
-
-```
-User Message (Lark/Feishu)
-       │
-       ▼
-┌─────────────────────────────────────────────────────┐
-│  ChannelManager (multi-app lark-cli orchestration)  │
-│  ├── LarkChannel: feishu app (subscribe process)    │
-│  └── ConflictResolver (launchd/process deconflict)  │
-└─────────────────┬───────────────────────────────────┘
-                  │
-       ▼ LarkMessage
-┌─────────────────────────────────────────────────────┐
-│  8-Stage Pipeline                                   │
-│  S1  Message Dispatcher    — dedup, @mention detect │
-│  S2  Context Assembler     — memory, time, persona  │
-│  S3S4 Cognitive Generator  — LLM call + behaviors   │
-│  S4.5 Biographical Extract — async fact extraction   │
-│  S5  Perception Wrapper    — anti-AI 4-step polish  │
-│  S5.5 Anti-AI Validator    — 8-dim fingerprint check│
-│  S6  Outbound Scheduler    — send + store           │
-└─────────────────────────────────────────────────────┘
-       │
-       ▼
-  Lark/Feishu Reply
-```
-
-### Key Features
-
-- **Persona Consistency** — YAML-driven character definition (background, OCEAN personality, speech patterns, knowledge boundaries)
-- **Biographical Memory** — Anchor facts + LLM-extracted generated facts with n-gram conflict detection
-- **Anti-AI Speech** — 6-rule post-processor + 8-dimension AI fingerprint validator to avoid robotic patterns
-- **Human Behaviors** — Probabilistic injection of push-back, feigned confusion, selective ignoring, mood refusal
-- **Multi-Service Architecture** — ChannelManager handles multiple lark-cli subscribes with exponential backoff reconnection
-- **Graceful Degradation** — LLM failure falls back to context-aware template responses
-
----
-
-## Prerequisites
-
-| Dependency | Version | Install |
-|---|---|---|
-| **Node.js** | >= 20.x | `brew install node` or [nvm](https://github.com/nvm-sh/nvm) |
-| **pnpm** | >= 10.x | `npm install -g pnpm` |
-| **lark-cli** | latest | `npm install -g @larksuite/cli` |
-| **SQLite** | (bundled) | Comes with `better-sqlite3` via pnpm |
-| **pm2** (production) | >= 5.x | `npm install -g pm2` |
-
-### Platform
-
-- Tested on **macOS** (Apple Silicon / Intel)
-- Should work on Linux with minor path adjustments
-- lark-cli requires a configured Lark/Feishu app (Open Platform)
-
----
-
-## Setup
+## 快速开始
 
 ```bash
-# 1. Clone
 git clone https://github.com/26bravespirit/gaia-bot.git
-cd gaia-bot/code
-
-# 2. Install dependencies
+cd gaia-bot
 pnpm install
-
-# 3. Configure environment
 cp .env.example .env
+# 编辑 .env 填入你的配置（见下方引导）
+pnpm build && pnpm start
 ```
 
-Edit `.env` with your credentials:
+使用 Claude Code 打开项目，输入 `/setup` 启动交互式初始化向导。
 
-```env
-# Lark CLI — path to lark-cli binary
-LARK_CLI_BIN=/opt/homebrew/bin/lark-cli
+## 初始化引导
 
-# Lark app HOME directory (where lark-cli config.json lives)
-LARK_HOME=/path/to/your/lark-cli/home
+1. **安装前置**: Node.js 20+, pnpm, lark-cli
+2. **创建 Persona**: 回答 5 个问题自动生成 persona.yaml
+3. **配置飞书**: 创建应用 → 登录 CLI → 获取 Chat ID
+4. **设置环境变量**: 编辑 `.env` 文件
+5. **构建启动**: `pnpm build && pnpm start`
 
-# Only respond to messages in this chat (leave empty for all chats)
-TARGET_CHAT_ID=oc_xxxxxxxxxxxxxxxx
+详细交互式引导请参考 [SKILL.md](./SKILL.md)。
 
-# OpenAI API
-OPENAI_API_KEY=sk-your-key-here
-OPENAI_MODEL=gpt-4.1-mini
-OPENAI_FALLBACK_MODEL=gpt-4.1-mini
-OPENAI_API_URL=https://api.openai.com/v1/responses
+## 架构
 
-# Bot identity (for self-message filtering and @mention detection)
-BOT_OPEN_ID=ou_xxxxxxxxxxxxxxxx
-BOT_MENTION_PATTERNS=@YourBot,YourBot
+```
+用户消息 (飞书/Lark)
+    │
+    ▼
+┌─ S1 消息调度 ──────────────────────────────┐
+│  去重、@检测、空消息过滤                      │
+└────────────────────────────────────────────┘
+    │
+    ▼
+┌─ S2 上下文组装 ────────────────────────────┐
+│  加载用户档案、对话历史、长期记忆、关系状态    │
+│  检测情绪、更新自我状态                       │
+└────────────────────────────────────────────┘
+    │
+    ▼
+┌─ S3+S4 认知生成 ───────────────────────────┐
+│  LLM 回复生成 + 人类行为概率注入              │
+│  降级模板兜底                                │
+└────────────────────────────────────────────┘
+    │
+    ├─→ S4.5 传记提取 (异步批量)
+    ├─→ S4.6 记忆提取 (异步批量)  ← ExtractionScheduler 协调
+    │
+    ▼
+┌─ S5 感知包装 ──────────────────────────────┐
+│  R01-R06 反 AI 规则 → 记忆模糊 → 不完美注入  │
+└────────────────────────────────────────────┘
+    │
+    ▼
+┌─ S5.5 Anti-AI 校验 ───────────────────────┐
+│  8 维指纹检测 → 评分 → PASS/WARN/BLOCK       │
+└────────────────────────────────────────────┘
+    │
+    ▼
+┌─ S6 出站调度 ──────────────────────────────┐
+│  多段落拆分为多条消息 → 打字延迟 → 发送       │
+└────────────────────────────────────────────┘
 ```
 
-### Lark App Setup
-
-1. Go to [Lark Open Platform](https://open.larksuite.com/) or [Feishu Open Platform](https://open.feishu.cn/)
-2. Create a bot application
-3. Enable event subscription for `im.message.receive_v1`
-4. Run `lark-cli login` to authenticate
-5. Set `LARK_HOME` to the directory containing your `.lark-cli/` config
-
----
-
-## Development
-
-```bash
-# Watch mode (auto-restart on file changes)
-pnpm dev
-
-# Type checking
-pnpm typecheck
-
-# Run tests
-pnpm test
-
-# Run tests in watch mode
-pnpm test:watch
-
-# Build
-pnpm build
-
-# Start (built version)
-pnpm start
-```
-
----
-
-## Production (pm2)
-
-```bash
-# Build first
-pnpm build
-
-# Start with pm2
-pnpm pm2:start
-
-# View logs
-pnpm pm2:logs
-
-# Check status
-pnpm pm2:status
-
-# Restart
-pnpm pm2:restart
-
-# Stop
-pnpm pm2:stop
-```
-
-pm2 configuration is in `ecosystem.config.cjs`. It limits restarts to 5 with 5s delay to prevent crash loops.
-
----
-
-## Multi-App Configuration (Advanced)
-
-To manage multiple Lark apps in a single process, set `LARK_CHANNELS` in `.env`:
-
-```env
-LARK_CHANNELS=[{"appId":"cli_xxx","larkHome":"/path/to/app1/home","chatFilter":["oc_chat1"]},{"appId":"cli_yyy","larkHome":"/path/to/app2/home"}]
-```
-
-When `LARK_CHANNELS` is set, `LARK_HOME` and `TARGET_CHAT_ID` are ignored. Each channel gets its own subscribe process with independent reconnection.
-
----
-
-## Persona Configuration
-
-Character definition lives in `persona.yaml`. Key sections:
-
-| Section | Purpose |
-|---|---|
-| `meta` | Name, description, author |
-| `identity` | Age, background, OCEAN personality, catchphrases |
-| `knowledge` | Expert/familiar/unfamiliar domains |
-| `language` | Tone, formality, style constraints |
-| `temporal` | Active hours, sleep mode, response delays |
-| `social` | Relationship stages, aliases |
-| `biography` | Anchor facts, forbidden fabrications |
-| `human_behaviors` | Push-back, confusion, teaching probabilities |
-| `anti_ai` | Anti-AI speech rules toggle |
-| `memory_blur` | Memory imprecision simulation |
-
-See [MVP-02 Persona Schema](https://github.com/26bravespirit/gaia-design) for the full specification.
-
----
-
-## Repository Structure
+## 目录结构
 
 ```
 gaia-bot/
-├── code/                           # Source code
-│   ├── src/
-│   │   ├── config/                 # Persona YAML loading & Zod schemas
-│   │   ├── engine/                 # Event bus, identity guardian, time engine
-│   │   ├── lark/                   # Lark IM — channel manager, conflict resolver
-│   │   ├── llm/                    # OpenAI Responses API client + prompt builder
-│   │   ├── memory/                 # Immediate / working / long-term / biographical
-│   │   ├── pipeline/              # 8-stage processing pipeline
-│   │   ├── utils/                 # Logger, env loader
-│   │   └── index.ts               # Entry point
-│   ├── tests/                     # Vitest test suites (75 tests)
-│   ├── persona.yaml               # Character definition
-│   ├── ecosystem.config.cjs       # pm2 config
-│   ├── .env.example               # Environment template
-│   └── package.json
-│
-└── docs/                          # Design documentation
-    ├── architecture/              # Main version designs (v3.1 → v5)
-    ├── branches/                  # Feature branches (v4.1, v4.2, v5.1, v5.2)
-    ├── mvp/                       # MVP specs & consistency reports
-    ├── operations/                # Bug log, changelog
-    └── quality/                   # Attack & penetration test reports
+├── src/
+│   ├── pipeline/     # 8 个管道阶段 + 调度器
+│   ├── memory/       # 5 层记忆系统
+│   ├── engine/       # 时间引擎、身份守卫、事件总线
+│   ├── llm/          # LLM 客户端 + Prompt 构建器
+│   ├── lark/         # 飞书通道管理
+│   ├── config/       # 配置 Schema + YAML 加载
+│   └── utils/        # 日志、环境、PID 锁
+├── tests/            # 171 个测试
+├── scripts/          # CLI 工具
+├── persona.yaml      # 人格定义（可热加载）
+├── .env.example      # 环境变量模板
+└── SKILL.md          # 交互式初始化向导
 ```
 
----
+## 配置参考
 
-## Tests
+`persona.yaml` 顶层配置节：
+
+| 节 | 说明 |
+|---|---|
+| meta | 名字、描述、作者 |
+| identity | 年龄、性格(Big Five)、身份边界 |
+| knowledge | 擅长/熟悉/不了解的领域 |
+| language | 说话风格、口语程度、口头禅 |
+| temporal | 活跃时间、能量周期 |
+| social | 关系阶段(陌生→亲密) |
+| memory | 记忆重要性权重、遗忘机制 |
+| biography | 人生经历锚点 |
+| human_behaviors | 反问/困惑/选择性忽略概率 |
+| anti_ai | 反 AI 检测开关和严格度 |
+
+## 工具脚本
 
 ```bash
-pnpm test
+# 查看记忆系统
+node scripts/inspect-memory.cjs all|ltm|rel|bio|self|conv
+
+# 通道控制
+node scripts/gaia-ctl.cjs status|on|off|routing
+
+# Web 控制面板
+node scripts/gaia-dashboard.cjs  # → http://localhost:3456
 ```
 
-**75 tests** across 8 suites:
+## 测试
 
-| Suite | Tests | Coverage |
-|---|---|---|
-| Pipeline S1 dispatcher | 5 | Message filtering, @mention, dedup |
-| Time engine | 8 | Active hours, sleep mode, energy |
-| Memory manager | 10 | SQLite CRUD, conversation history |
-| Identity guardian | 6 | Prompt injection, identity challenges |
-| Channel manager | 10 | Conflict resolver, lifecycle, routing |
-| Persona consistency | 8 | Cross-topic style coherence |
-| Attack vectors | 15 | Injection, jailbreak, identity probing |
-| UAT journey | 13 | Natural conversation, emotion, knowledge |
+```bash
+pnpm test           # 运行全部 171 个测试
+pnpm test:watch     # 监听模式
+pnpm typecheck      # 类型检查
+```
 
----
+## 设计文档
+
+详细的架构设计文档在 [gaia-design](https://github.com/26bravespirit/gaia-design) 仓库：
+
+- 架构设计 v3.1 → v5
+- MVP 开发文档 (MVP-00 ~ MVP-06)
+- 攻击测试报告
+- Bug 追踪日志
 
 ## License
 
-Private repository. All rights reserved.
+MIT
