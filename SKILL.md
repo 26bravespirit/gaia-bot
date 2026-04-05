@@ -388,13 +388,27 @@ aliases: {}
 
 **如果用户回答"是"**：跳过此步骤，直接进入第 5 步。
 
-**如果用户回答"否"**：引导用户完成以下操作。
+**如果用户回答"否"**：先确认平台版本，然后引导配置。
 
-向用户说明：
+使用 AskUserQuestion 询问：
 
-> 需要在飞书开放平台创建应用并配置 lark-cli。请按以下步骤操作：
+> 你使用的是哪个平台？
+
+选项：
+- A) 飞书（中国大陆版）— brand 为 `feishu`，开放平台地址 open.feishu.cn
+- B) Lark（国际版）— brand 为 `lark`，开放平台地址 open.larksuite.com
+
+记住用户的选择，后续步骤中：
+- 如果选 **飞书**：开放平台链接用 `https://open.feishu.cn`，`lark-cli auth login` 时 brand 为 `feishu`
+- 如果选 **Lark**：开放平台链接用 `https://open.larksuite.com`，`lark-cli auth login` 时 brand 为 `lark`
+
+然后引导用户完成以下操作。
+
+向用户说明（根据用户选择的平台替换链接）：
+
+> 需要在开放平台创建应用并配置 lark-cli。请按以下步骤操作：
 >
-> 1. 打开飞书开放平台：https://open.feishu.cn （国际版：https://open.larksuite.com）
+> 1. 打开开放平台：{飞书: https://open.feishu.cn / Lark: https://open.larksuite.com}
 > 2. 点击"创建企业自建应用"
 > 3. 填写应用名称（比如你的角色名）和描述
 > 4. 在应用的"添加应用能力"中，开启"机器人"能力
@@ -407,10 +421,16 @@ aliases: {}
 
 等待用户确认已完成上述操作后，继续：
 
-> 现在运行 lark-cli 登录：
+> 现在运行 lark-cli 登录（注意选择对应的 brand）：
 
+飞书用户：
 ```bash
-lark-cli auth login
+lark-cli auth login --brand feishu
+```
+
+Lark 用户：
+```bash
+lark-cli auth login --brand lark
 ```
 
 这会打开浏览器进行 OAuth 认证。登录完成后，运行以下命令确认登录状态：
