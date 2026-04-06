@@ -28,13 +28,35 @@ const PROACTIVE_TEMPLATES: Record<string, string[]> = {
 };
 
 export class ProactiveInitiator {
-  private dailyCounts = new Map<string, { count: number; date: string }>();
-
   constructor(
     private getConfig: () => PersonaConfig,
     private memory: MemoryManager,
     private timeEngine: TimeEngine,
   ) {}
+
+  /** Count today's proactive messages in a chat (from DB, survives restarts). */
+  private getDailyCount(chatId: string): number {
+    const db = this.memory.working.getDb();
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+    const row = db.prepare(
+      "SELECT COUNT(*) as c FROM conversation_log WHERE message_id LIKE 'proactive_%' AND chat_id = ? AND timestamp >= ?",
+    ).get(chatId, todayStart) as { c: number } | undefined;
+    return row?.c ?? 0;
+  }
+
+  /** Check if the last proactive message in a chat got no user response. */
+  private hasUnansweredProactive(chatId: string): boolean {
+    const db = this.memory.working.getDb();
+    const lastProactive = db.prepare(
+      "SELECT timestamp FROM conversation_log WHERE message_id LIKE 'proactive_%' AND chat_id = ? ORDER BY timestamp DESC LIMIT 1",
+    ).get(chatId) as { timestamp: number } | undefined;
+    if (!lastProactive) return false;
+
+    const userReply = db.prepare(
+      "SELECT 1 FROM conversation_log WHERE chat_id = ? AND role = 'user' AND timestamp > ? LIMIT 1",
+    ).get(chatId, lastProactive.timestamp);
+    return !userReply;
+  }
 
   check(): ProactiveMessage | null {
     const config = this.getConfig();
@@ -61,11 +83,13 @@ export class ProactiveInitiator {
     }
 
     for (const user of uniqueUsers) {
-      // Check daily limit
-      const daily = this.dailyCounts.get(user.user_id);
-      if (daily && daily.date === today && daily.count >= proactive.max_daily_initiations) {
-        continue;
-      }
+      const chatId = user.chat_id;
+
+      // Guard 1: per-chat daily limit (from DB, survives restart)
+      if (this.getDailyCount(chatId) >= proactive.max_daily_initiations) continue;
+
+      // Guard 2: last proactive in this chat got no reply — don't pile on
+      if (this.hasUnansweredProactive(chatId)) continue;
 
       // Check silence threshold
       const lastMsg = db.prepare(
@@ -120,14 +144,7 @@ export class ProactiveInitiator {
       // Pick a random template
       const text = templates[Math.floor(Math.random() * templates.length)];
 
-      // Update daily count
-      if (daily && daily.date === today) {
-        daily.count++;
-      } else {
-        this.dailyCounts.set(user.user_id, { count: 1, date: today });
-      }
-
-      logger.info(`proactive: trigger=${trigger} user=${user.user_id} silence=${silenceHours.toFixed(1)}h`);
+      logger.info(`proactive: trigger=${trigger} user=${user.user_id} chat=${chatId} silence=${silenceHours.toFixed(1)}h dailyCount=${this.getDailyCount(chatId)}`);
 
       return {
         userId: user.user_id,
