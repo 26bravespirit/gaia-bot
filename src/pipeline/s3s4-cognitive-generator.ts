@@ -90,7 +90,7 @@ export class S3S4CognitiveGenerator implements PipelineStage {
     const text = ctx.rawText;
 
     // Detect biography topic
-    const biographyKeywords = /小时候|以前|之前|童年|家人|冲浪|摄影|经历|故事|过去/;
+    const biographyKeywords = /小时候|以前|之前|童年|家人|冲浪|摄影|经历|故事|过去|学历|大学|学校|读书|毕业|专业|本科|硕士|博士|研究生|高中|读的|哪里上的|什么学校|学什么/;
     const biographyTopic = biographyKeywords.test(text);
 
     // Detect identity challenge

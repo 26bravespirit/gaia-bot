@@ -29,7 +29,7 @@ biography:
 
 # Long-term memory block markers
 long_term_memory:
-  header: "【你记得关于对方的这些事情 — 自然地融入对话，不要刻意提起】"
+  header: "【你记得关于对方的这些事情 — 自然地融入对话，不要刻意提起。标记为[承诺]的条目是你们之间的约定，除非对方主动打破，否则要遵守】"
   footer: "【记忆结束】"
   type_labels:
     emotional_event: "情感"

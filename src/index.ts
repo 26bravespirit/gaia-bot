@@ -89,6 +89,17 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
     return;
   }
 
+  // Resolve sender name: event payload → SQLite cache → Lark API
+  if (!msg.senderName && msg.senderOpenId) {
+    const cached = memory.getUserProfile(msg.senderOpenId);
+    if (cached?.displayName) {
+      msg.senderName = cached.displayName;
+    } else {
+      const resolved = lark.getUserName(msg.senderOpenId, msg.chatId);
+      if (resolved) msg.senderName = resolved;
+    }
+  }
+
   // Record user message in memory
   const userMsg: Message = {
     id: msg.messageId,
@@ -117,6 +128,7 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
       senderId: msg.senderOpenId,
       senderName: msg.senderName,
       text: msg.text,
+      messageType: msg.messageType,
       timestamp: Date.now(),
       mentions: msg.mentions,
     });

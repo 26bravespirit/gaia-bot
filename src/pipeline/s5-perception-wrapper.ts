@@ -36,6 +36,13 @@ export class S5PerceptionWrapper implements PipelineStage {
       return ctx;
     }
 
+    // Sleep mode path: skip all post-processing, send as-is
+    if (ctx.selectedModel === 'sleep_mode') {
+      ctx.finalResponse = response;
+      ctx.s5StepsExecuted = steps;
+      return ctx;
+    }
+
     // ── Step 1: Anti-AI Rules R01-R06 ──
     const antiAiResult = this.step1AntiAiRules(response, ctx, steps);
     response = antiAiResult;
@@ -69,11 +76,30 @@ export class S5PerceptionWrapper implements PipelineStage {
     return ctx;
   }
 
-  // ── Step 1: Anti-AI Rules R01-R06 ──
+  // ── Step 1: Anti-AI Rules R00-R06 ──
   private step1AntiAiRules(text: string, ctx: PipelineContext, steps: S5StepsExecuted): string {
     const applied: string[] = [];
     const removed: string[] = [];
     let result = text;
+
+    // R00: Prompt Leak Sanitizer — strip leaked instruction markers and English fragments
+    const beforeR00 = result;
+    // Remove 【...】 instruction blocks that leaked into output
+    result = result.replace(/【[^】]*】/g, '');
+    // Remove English instruction fragments (e.g. "analysis to=final code omitted")
+    result = result.replace(/\b(?:analysis|code|omitted|instruction|prompt|system|token|calibration|block|step|final)\b[^。！？!?\n\u4e00-\u9fa5]*/gi, '');
+    // Clean up residual artifacts: stray brackets, multiple spaces, leading/trailing punctuation
+    result = result.replace(/[【】\[\]]/g, '').replace(/\s{2,}/g, ' ').replace(/^[，,。\s]+/, '').replace(/[，,\s]+$/, '');
+    if (result !== beforeR00) {
+      applied.push('R00');
+      removed.push('prompt_leak');
+      logger.warn('S5 R00: stripped leaked prompt markers from response');
+    }
+    // If cleaning left nothing meaningful, flag for degradation
+    if (result.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').length < 2) {
+      result = ctx.config.degradation?.templates?.default?.[Math.floor(Math.random() * (ctx.config.degradation?.templates?.default?.length || 1))] || '嗯...';
+      applied.push('R00_fallback');
+    }
 
     // R01: Enumeration Killer — convert numbered lists to natural text
     // Exemption: if user asked ≥2 questions, skip R01
@@ -196,6 +222,12 @@ export class S5PerceptionWrapper implements PipelineStage {
   private step2MemoryBlur(text: string, config: PersonaConfig, steps: S5StepsExecuted): string {
     const blurConfig = config.memory_blur;
     if (!blurConfig?.enabled) {
+      steps.memoryBlur = { triggered: false, patterns: [] };
+      return text;
+    }
+
+    // Skip blur for short responses — blurring a 10-char reply makes no sense
+    if (text.length < 30) {
       steps.memoryBlur = { triggered: false, patterns: [] };
       return text;
     }

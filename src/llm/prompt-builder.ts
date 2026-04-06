@@ -123,6 +123,17 @@ export function buildMessages(ctx: PromptContext): LLMMessage[] {
       systemPrompt += `（称呼对方为"${alias}"，不要加括号注明原名）`;
     }
 
+    // Inject known contact role (prevents guessing hierarchy)
+    const contactInfo = ctx.config.known_contacts?.[ctx.userProfile.displayName];
+    if (contactInfo) {
+      systemPrompt += `\n对方身份：${contactInfo.role}`;
+      if (contactInfo.relationship_hint) {
+        systemPrompt += `（${contactInfo.relationship_hint}）`;
+      }
+    } else {
+      systemPrompt += '\n你不确定对方的职级和身份，不要猜测对方是上级或下级，以平等态度对话。';
+    }
+
     // Use relationshipState from RelationshipModel (authoritative source)
     const relStage = ctx.relationshipState?.stage || ctx.userProfile.relationshipStage;
     const social = ctx.config.social;
@@ -139,6 +150,8 @@ export function buildMessages(ctx: PromptContext): LLMMessage[] {
         }
         if (mods.self_disclosure > 0.5) systemPrompt += '\n' + relHints.self_disclosure;
         if (mods.humor_modifier > 0.3) systemPrompt += '\n' + relHints.humor;
+        // Basic facts (education, job, hobbies) are public info, always shareable
+        systemPrompt += '\n学历、职业、兴趣爱好属于公开信息，任何人问都可以自然地说。只有深层情感、家庭隐私等话题才需要看亲密度。';
       }
     }
 

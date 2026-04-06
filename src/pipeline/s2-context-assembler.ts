@@ -91,17 +91,16 @@ export class S2ContextAssembler implements PipelineStage {
     // Get time state
     ctx.timeState = this.timeEngine.getState();
 
-    // Check sleep mode
-    if (ctx.timeState.isSleepMode && !ctx.mentionedBot) {
-      const sleepResp = this.timeEngine.getSleepResponse();
-      if (sleepResp) {
-        ctx.generatedResponse = sleepResp;
-        ctx.finalResponse = sleepResp;
-        ctx.selectedModel = 'sleep_mode';
-        // Skip S3+S4, go directly to S5
-        return ctx;
-      }
-    }
+    // Sleep mode disabled — always respond normally regardless of time
+    // if (ctx.timeState.isSleepMode && !ctx.mentionedBot) {
+    //   const sleepResp = this.timeEngine.getSleepResponse();
+    //   if (sleepResp) {
+    //     ctx.generatedResponse = sleepResp;
+    //     ctx.finalResponse = sleepResp;
+    //     ctx.selectedModel = 'sleep_mode';
+    //     return ctx;
+    //   }
+    // }
 
     // Load conversation history (exclude current message — it's added separately by prompt-builder)
     const historyWindow = this.timeEngine.getHistoryWindowSize();
@@ -122,16 +121,28 @@ export class S2ContextAssembler implements PipelineStage {
     }
 
     // Phase 1: Retrieve long-term memories for context
+    const allLtm: Array<{ type: string; content: string; importance: number }> = [];
+
+    // Always inject active promises (not keyword-dependent)
+    const promises = this.memory.longTerm.getActivePromises(ctx.rawSenderId, 5);
+    for (const p of promises) {
+      allLtm.push({ type: p.type, content: p.content, importance: p.importance });
+    }
+
+    // Keyword-based memories (emotional events, factual details, etc.)
     const ltmKeywords = this.extractLtmKeywords(ctx.rawText);
     if (ltmKeywords.length > 0) {
       const memories = this.memory.searchMemories(ctx.rawSenderId, ltmKeywords);
-      if (memories.length > 0) {
-        ctx.longTermMemories = memories.map(m => ({
-          type: m.type,
-          content: m.content,
-          importance: m.importance,
-        }));
+      for (const m of memories) {
+        // Deduplicate against already-added promises
+        if (!allLtm.some(existing => existing.content === m.content)) {
+          allLtm.push({ type: m.type, content: m.content, importance: m.importance });
+        }
       }
+    }
+
+    if (allLtm.length > 0) {
+      ctx.longTermMemories = allLtm;
     }
 
     // Phase 1: Retrieve relationship state from RelationshipModel

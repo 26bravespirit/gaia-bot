@@ -104,10 +104,8 @@ export class TimeEngine {
   getSleepResponse(): string | null {
     const state = this.getState();
     if (!state.isSleepMode) return null;
-    // Use forgetting expressions from config, or defaults
-    const expressions = this.config.memory?.forgetting?.forgetting_expression;
-    const pool = expressions?.length ? SLEEP_RESPONSES_DEFAULT.concat(expressions) : SLEEP_RESPONSES_DEFAULT;
-    return pool[Math.floor(Math.random() * pool.length)];
+    // Only use sleep-specific responses, not forgetting expressions
+    return SLEEP_RESPONSES_DEFAULT[Math.floor(Math.random() * SLEEP_RESPONSES_DEFAULT.length)];
   }
 
   getHistoryWindowSize(): number {

@@ -158,7 +158,7 @@ export function buildChannelManagerFromEnv(): ChannelManager {
       larkHome,
       larkBinary: process.env.LARK_CLI_BIN,
       eventTypes: (process.env.EVENT_TYPES || 'im.message.receive_v1').split(',').map(s => s.trim()).filter(Boolean),
-      chatFilter: targetChatId ? [targetChatId] : undefined,
+      chatFilter: targetChatId ? targetChatId.split(',').map(s => s.trim()).filter(Boolean) : undefined,
     });
     logger.info('ChannelManager: loaded 1 channel from legacy env vars');
   }
