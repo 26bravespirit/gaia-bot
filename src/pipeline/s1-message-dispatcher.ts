@@ -47,7 +47,7 @@ export class S1MessageDispatcher implements PipelineStage {
       const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       ctx.rawText = ctx.rawText.replace(new RegExp(escaped, 'gi'), '').trim();
     }
-    ctx.rawText = ctx.rawText.replace(/@\S+\s*/g, '').trim();
+    ctx.rawText = ctx.rawText.replace(/@[\w.]+\s*/g, '').trim();
 
     if (!ctx.rawText) {
       ctx.shouldReply = false;

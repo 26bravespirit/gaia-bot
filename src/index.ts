@@ -112,7 +112,7 @@ async function runPipeline(burst: CoalescedMessage): Promise<void> {
     if (result.deliveryStatus === 'sent') {
       logger.info(`replied to [${burst.senderName}]: ${result.finalResponse.slice(0, 50)}...`);
     } else if (result.skipReason) {
-      logger.debug(`skipped: ${result.skipReason}`);
+      logger.info(`skipped [${burst.senderName}]: ${result.skipReason}`);
     }
 
     if (result.pipelineTimings) {
