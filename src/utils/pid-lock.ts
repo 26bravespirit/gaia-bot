@@ -28,6 +28,9 @@ export function acquirePidLock(): void {
     }
   }
 
+  // Kill any stale persona-bot processes (covers old code without PID lock)
+  killStaleInstances();
+
   // Write our PID
   writeFileSync(PID_FILE, String(process.pid));
   logger.info(`PID lock acquired: ${process.pid}`);
@@ -47,6 +50,34 @@ export function releasePidLock(): void {
     }
   } catch {
     // ignore
+  }
+}
+
+/**
+ * Kill any other node processes running dist/index.js in the same project directory.
+ * This catches old-version processes that don't have PID lock mechanism.
+ */
+function killStaleInstances(): void {
+  try {
+    const output = execSync('ps aux', { encoding: 'utf-8', timeout: 5000 });
+    const myPid = process.pid;
+    for (const line of output.split('\n')) {
+      if (!line.includes('dist/index.js')) continue;
+      if (line.includes('grep')) continue;
+      const parts = line.trim().split(/\s+/);
+      const pid = parseInt(parts[1], 10);
+      if (pid === myPid || isNaN(pid)) continue;
+      // Check if it's the same project by looking for our data dir in its cwd
+      try {
+        const lsofOut = execSync(`lsof -p ${pid} 2>/dev/null | grep cwd`, { encoding: 'utf-8', timeout: 3000 });
+        if (lsofOut.includes('gaia-bot') || lsofOut.includes('persona-bot')) {
+          logger.warn(`killStaleInstances: found stale process PID ${pid}, killing`);
+          killProcessTree(pid);
+        }
+      } catch { /* ignore lsof errors */ }
+    }
+  } catch {
+    // Non-fatal: best effort cleanup
   }
 }
 

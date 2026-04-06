@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: 'persona-bot',
+    name: 'gaia-bot',
     script: 'dist/index.js',
     cwd: __dirname,
     instances: 1,               // 强制单实例
@@ -13,7 +13,7 @@ module.exports = {
     shutdown_with_message: true, // 发 shutdown message 而非直接 SIGKILL
     env: {
       NODE_ENV: 'production',
-      SERVICE_NAME: 'persona-bot',
+      SERVICE_NAME: 'gaia-bot',
       PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
     }
   }]

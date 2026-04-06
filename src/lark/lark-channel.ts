@@ -192,8 +192,17 @@ export class LarkChannel {
 
   private scheduleReconnect(): void {
     if (this.state.reconnectAttempts >= this.state.maxReconnectAttempts) {
-      logger.error(`LarkChannel[${this.config.appId}]: max reconnect attempts (${this.state.maxReconnectAttempts}) exhausted`);
-      this.state.status = 'error';
+      // Don't give up permanently — schedule a long-interval retry every 10 minutes
+      logger.error(`LarkChannel[${this.config.appId}]: max reconnect attempts (${this.state.maxReconnectAttempts}) exhausted, entering long-interval retry (10min)`);
+      this.state.status = 'reconnecting';
+      this.reconnectTimer = setTimeout(async () => {
+        this.reconnectTimer = null;
+        if (this.abortController.signal.aborted) return;
+        logger.info(`LarkChannel[${this.config.appId}]: long-interval retry, resetting reconnect counter`);
+        this.state.reconnectAttempts = 0;
+        await this.conflictResolver.resolve(this.config.appId, this.config.larkHome);
+        await this.spawnSubscribe();
+      }, 10 * 60_000);
       return;
     }
 
