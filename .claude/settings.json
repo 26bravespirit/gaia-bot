@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm *)",
+      "Bash(npm *)",
+      "Bash(node *)",
+      "Bash(lark-cli *)",
+      "Bash(sqlite3 *)",
+      "Bash(kill *)",
+      "Bash(ps *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(sleep *)",
+      "Edit",
+      "Write"
+    ]
+  }
+}

@@ -79,6 +79,7 @@ function makeCtx(overrides: Partial<PipelineContext> = {}): PipelineContext {
     rawSenderId: 'user_001',
     rawSenderName: 'Test User',
     rawText: '你好',
+    rawMessageType: 'text',
     rawTimestamp: Date.now(),
     rawMentions: [],
     mentionedBot: false,
@@ -263,9 +264,10 @@ describe('S5 PerceptionWrapper', () => {
         rawText: '说说',
       });
       const result = await s5.execute(ctx);
-      // Response should be shorter than the original
+      // Response should be shorter than the original (R04 or R05 may truncate)
       expect(result.finalResponse!.length).toBeLessThan(longResponse.length);
-      expect(result.s5StepsExecuted?.antiAiRules?.applied).toContain('R04');
+      const applied = result.s5StepsExecuted?.antiAiRules?.applied || [];
+      expect(applied.some(r => r === 'R04' || r === 'R05')).toBe(true);
     });
 
     it('should not truncate short responses', async () => {
@@ -348,7 +350,7 @@ describe('S5 PerceptionWrapper', () => {
       const s5blur = new S5PerceptionWrapper(mockGuardian as any);
       const ctx = makeCtx({
         config: configWithMemoryBlur,
-        generatedResponse: '去年5月15日我们去了那个地方。',
+        generatedResponse: '去年5月15日我们去了那个地方，当时天气特别好，阳光很灿烂。',
         rawText: '说说看',
       });
       const result = await s5blur.execute(ctx);

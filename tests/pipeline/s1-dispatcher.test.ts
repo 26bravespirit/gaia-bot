@@ -9,6 +9,7 @@ function makeCtx(overrides: Partial<PipelineContext> = {}): PipelineContext {
     rawSenderId: 'user_001',
     rawSenderName: 'Test User',
     rawText: '你好',
+    rawMessageType: 'text',
     rawTimestamp: Date.now(),
     rawMentions: [],
     mentionedBot: false,

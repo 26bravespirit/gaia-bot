@@ -20,6 +20,7 @@ function makeCtx(overrides: Partial<PipelineContext> = {}): PipelineContext {
     rawSenderId: 'user_001',
     rawSenderName: 'Test User',
     rawText: '你好',
+    rawMessageType: 'text',
     rawTimestamp: Date.now(),
     rawMentions: [],
     mentionedBot: false,
@@ -442,7 +443,8 @@ describe('Phase 1: S2 Context Assembler integration', () => {
 
     const ctx = makeCtx({ mentionedBot: false, rawText: '你好' });
     const result = await sleepS2.execute(ctx);
-    expect(result.selectedModel).toBe('sleep_mode');
-    expect(result.generatedResponse.length).toBeGreaterThan(0);
+    // Sleep mode is now disabled — bot always responds normally
+    expect(result.selectedModel).not.toBe('sleep_mode');
+    expect(result.shouldReply).toBe(true);
   });
 });
