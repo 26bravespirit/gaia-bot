@@ -76,6 +76,7 @@ export class ExtractionScheduler {
   private ltmBuffer: LtmEntry[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private flushing = false;
+  private flushPromise: Promise<void> | null = null;
   private messageCount = 0;
 
   constructor(private memory: MemoryManager) {}
@@ -112,20 +113,26 @@ export class ExtractionScheduler {
     }, delayMs);
   }
 
-  private async flush(): Promise<void> {
-    if (this.flushing) return;
+  private flush(): Promise<void> {
+    if (this.flushing) return this.flushPromise ?? Promise.resolve();
     this.flushing = true;
     this.messageCount = 0;
 
+    this.flushPromise = this.doFlush().finally(() => {
+      this.flushing = false;
+      this.flushPromise = null;
+    });
+
+    return this.flushPromise;
+  }
+
+  private async doFlush(): Promise<void> {
     // Take snapshots and clear buffers
     const bioBatch = this.bioBuffer.splice(0);
     const ltmBatch = this.ltmBuffer.splice(0);
 
     const totalItems = bioBatch.length + ltmBatch.length;
-    if (totalItems === 0) {
-      this.flushing = false;
-      return;
-    }
+    if (totalItems === 0) return;
 
     logger.info(`ExtractionScheduler: flushing ${bioBatch.length} bio + ${ltmBatch.length} ltm entries`);
 
@@ -138,8 +145,6 @@ export class ExtractionScheduler {
     if (ltmBatch.length > 0) {
       await this.flushLtm(ltmBatch);
     }
-
-    this.flushing = false;
   }
 
   private async flushBio(batch: BioEntry[]): Promise<void> {
@@ -243,6 +248,10 @@ export class ExtractionScheduler {
 
   async shutdown(): Promise<void> {
     if (this.flushTimer) clearTimeout(this.flushTimer);
+    // Wait for in-flight flush to complete before draining remaining buffer
+    if (this.flushPromise) {
+      await this.flushPromise;
+    }
     if (this.bioBuffer.length > 0 || this.ltmBuffer.length > 0) {
       await this.flush();
     }

@@ -19,7 +19,7 @@ const Database = require('better-sqlite3');
 const { execSync } = require('child_process');
 const path = require('path');
 
-const PORT = 3456;
+const PORT = parseInt(process.env.PORT, 10) || 3456;
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const DB_PATH = path.resolve(PROJECT_ROOT, 'data/persona.db');
 
@@ -107,7 +107,7 @@ function apiStatus() {
   const channels = {};
 
   for (const [name, ch] of Object.entries(CHANNELS)) {
-    const enabled = getConfig(db, ch.configKey) || 'false';
+    const enabled = getConfig(db, ch.configKey) ?? 'true';
     const proc = detectProcess(ch.processPattern);
     const sub = detectSubscribe(name);
     channels[name] = {

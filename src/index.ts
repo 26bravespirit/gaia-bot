@@ -214,7 +214,10 @@ async function main() {
   }, 5 * 60_000);
 
   // Graceful shutdown — clean up everything including child process tree
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info('Shutting down...');
     clearInterval(proactiveInterval);
     clearInterval(healthInterval);

@@ -18,6 +18,15 @@ export class S6OutboundScheduler implements PipelineStage {
       return ctx;
     }
 
+    // Re-check channel enabled right before delivery (may have been toggled during pipeline)
+    const channelEnabled = this.memory.getRuntimeConfig('channel_feishu_enabled');
+    if (channelEnabled === 'false') {
+      ctx.deliveryStatus = 'failed';
+      ctx.skipReason = 'channel_disabled_during_pipeline';
+      logger.info('S6: channel disabled during pipeline, dropping response');
+      return ctx;
+    }
+
     // Split multi-paragraph response into separate messages (like a real person)
     const segments = this.splitIntoMessages(ctx.finalResponse);
 

@@ -40,6 +40,13 @@ export class ConflictResolver {
         continue;
       }
 
+      // Never kill ourselves
+      if (pid === process.pid) {
+        logger.info(`ConflictResolver: PID ${pid} is our own process, removing stale lock ${lockFile}`);
+        try { unlinkSync(lockPath); } catch { /* ignore */ }
+        continue;
+      }
+
       // Check if process is alive
       if (!this.isProcessAlive(pid)) {
         logger.info(`ConflictResolver: PID ${pid} is dead, removing stale lock ${lockFile}`);
@@ -78,7 +85,77 @@ export class ConflictResolver {
       }
     }
 
+    // Phase 2: Kill any orphan subscribe processes for the same appId
+    // These may exist without lock files (PM2 respawns, launchd workers, stale orphans)
+    await this.killOrphanSubscribes(appId);
+
     return true;
+  }
+
+  /**
+   * Scan ps aux for any lark-cli subscribe processes NOT owned by us.
+   * This catches orphans from PM2 restarts, launchd workers, or crashed parents.
+   */
+  private async killOrphanSubscribes(appId: string): Promise<void> {
+    try {
+      const output = execSync('ps -eo pid,ppid,command', { encoding: 'utf-8', timeout: 5000 });
+      const myPid = process.pid;
+      const escapedAppId = appId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`lark-cli.*subscribe`);
+
+      for (const line of output.split('\n')) {
+        if (!pattern.test(line)) continue;
+        if (line.includes('grep')) continue;
+
+        const parts = line.trim().split(/\s+/);
+        const pid = parseInt(parts[0], 10);
+        const ppid = parseInt(parts[1], 10);
+        if (isNaN(pid)) continue;
+
+        // Skip our own children (ppid === us) or ourselves
+        if (pid === myPid || ppid === myPid) continue;
+
+        // Skip if parent is alive and is our process (grandchild — node wrapper → lark-cli binary)
+        if (this.isOurDescendant(ppid, myPid)) continue;
+
+        logger.warn(`ConflictResolver: killing orphan subscribe PID ${pid} (parent=${ppid})`);
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already dead */ }
+      }
+
+      // Brief wait for processes to exit
+      await new Promise(r => setTimeout(r, 1000));
+
+      // SIGKILL any survivors
+      const output2 = execSync('ps -eo pid,ppid,command', { encoding: 'utf-8', timeout: 5000 });
+      for (const line of output2.split('\n')) {
+        if (!pattern.test(line)) continue;
+        if (line.includes('grep')) continue;
+        const parts = line.trim().split(/\s+/);
+        const pid = parseInt(parts[0], 10);
+        const ppid = parseInt(parts[1], 10);
+        if (isNaN(pid) || pid === myPid || ppid === myPid) continue;
+        if (this.isOurDescendant(ppid, myPid)) continue;
+        logger.warn(`ConflictResolver: SIGKILL orphan subscribe PID ${pid}`);
+        try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+      }
+    } catch (err) {
+      logger.warn(`ConflictResolver: orphan scan failed: ${err}`);
+    }
+  }
+
+  /**
+   * Check if a PID is a descendant of targetPid by walking the ppid chain.
+   */
+  private isOurDescendant(pid: number, targetPid: number): boolean {
+    if (pid === targetPid) return true;
+    try {
+      const output = execSync(`ps -p ${pid} -o ppid=`, { encoding: 'utf-8', timeout: 2000 }).trim();
+      const ppid = parseInt(output, 10);
+      if (isNaN(ppid) || ppid <= 1) return false;
+      return ppid === targetPid || this.isOurDescendant(ppid, targetPid);
+    } catch {
+      return false;
+    }
   }
 
   private isProcessAlive(pid: number): boolean {

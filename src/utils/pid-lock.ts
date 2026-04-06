@@ -4,6 +4,7 @@ import { execSync } from 'child_process';
 import { logger } from './logger.js';
 
 const PID_FILE = resolve(import.meta.dirname || '.', '../../data/persona-bot.pid');
+const PROJECT_ROOT = resolve(import.meta.dirname || '.', '../..');
 
 /**
  * Ensure only one instance of persona-bot is running.
@@ -54,8 +55,9 @@ export function releasePidLock(): void {
 }
 
 /**
- * Kill any other node processes running dist/index.js in the same project directory.
- * This catches old-version processes that don't have PID lock mechanism.
+ * Kill any other node processes running dist/index.js in the SAME project directory.
+ * Uses lsof cwd to match our exact PROJECT_ROOT — won't accidentally kill
+ * instances from other directories (e.g. persona-bot vs gaia-bot).
  */
 function killStaleInstances(): void {
   try {
@@ -63,15 +65,15 @@ function killStaleInstances(): void {
     const myPid = process.pid;
     for (const line of output.split('\n')) {
       if (!line.includes('dist/index.js')) continue;
-      if (line.includes('grep')) continue;
+      if (line.includes('grep') || line.includes('gaia-ctl') || line.includes('gaia-dashboard')) continue;
       const parts = line.trim().split(/\s+/);
       const pid = parseInt(parts[1], 10);
       if (pid === myPid || isNaN(pid)) continue;
-      // Check if it's the same project by looking for our data dir in its cwd
+      // Check if it's the EXACT same project by matching our PROJECT_ROOT in cwd
       try {
         const lsofOut = execSync(`lsof -p ${pid} 2>/dev/null | grep cwd`, { encoding: 'utf-8', timeout: 3000 });
-        if (lsofOut.includes('gaia-bot') || lsofOut.includes('persona-bot')) {
-          logger.warn(`killStaleInstances: found stale process PID ${pid}, killing`);
+        if (lsofOut.includes(PROJECT_ROOT)) {
+          logger.warn(`killStaleInstances: found stale process PID ${pid} in our project dir, killing`);
           killProcessTree(pid);
         }
       } catch { /* ignore lsof errors */ }
