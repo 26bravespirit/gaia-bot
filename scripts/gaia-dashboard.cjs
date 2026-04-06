@@ -11,12 +11,13 @@
  *   GET  /api/memory              记忆系统详情
  *   GET  /api/routing             路由规则
  *   POST /api/routing             更新路由规则 (JSON body)
+ *   GET  /api/consistency          消息一致性检查 (DB vs Lark API, 最近100条)
  *   GET  /                        仪表盘页面
  */
 
 const http = require('http');
 const Database = require('better-sqlite3');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const path = require('path');
 
 const PORT = parseInt(process.env.PORT, 10) || 3456;
@@ -190,6 +191,131 @@ function apiUpdateRouting(body) {
   setConfig(db, 'routing_rules', JSON.stringify(body));
   db.close();
   return { ok: true };
+}
+
+// ── Consistency check ─────────────────────────────────────────────────
+
+const LARK_CLI_BIN = process.env.LARK_CLI_BIN || '/opt/homebrew/bin/lark-cli';
+const CONSISTENCY_LARK_HOME = process.env.LARK_HOME || process.env.HOME;
+const CONSISTENCY_CHAT_IDS = (process.env.TARGET_CHAT_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+const CONSISTENCY_INTERVAL_MS = 60_000; // 60s between scans
+const CONSISTENCY_MSG_COUNT = 100;
+
+let consistencyCache = null;
+let consistencyLastRun = 0;
+
+function larkCliListMessages(chatId, pageSize) {
+  const env = { ...process.env, HOME: CONSISTENCY_LARK_HOME, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin' };
+  try {
+    const out = execFileSync(LARK_CLI_BIN, [
+      'im', '+chat-messages-list',
+      '--chat-id', chatId,
+      '--as', 'bot',
+      '--page-size', String(pageSize),
+      '--sort', 'desc',
+      '--format', 'json',
+    ], { encoding: 'utf-8', timeout: 15000, env });
+    return JSON.parse(out);
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+function apiConsistency(force) {
+  const now = Date.now();
+  if (!force && consistencyCache && (now - consistencyLastRun) < CONSISTENCY_INTERVAL_MS) {
+    return consistencyCache;
+  }
+
+  const db = openDb(true);
+
+  // Find the most active chat if no TARGET_CHAT_ID
+  let chatIds = CONSISTENCY_CHAT_IDS;
+  if (chatIds.length === 0) {
+    try {
+      const rows = db.prepare(
+        'SELECT chat_id, COUNT(*) as cnt FROM conversation_log GROUP BY chat_id ORDER BY cnt DESC LIMIT 1'
+      ).all();
+      if (rows.length > 0) chatIds = [rows[0].chat_id];
+    } catch (_) {}
+  }
+
+  if (chatIds.length === 0) {
+    db.close();
+    return { ok: false, error: 'no_chat_id', checkedAt: now };
+  }
+
+  const chatId = chatIds[0];
+  const results = [];
+
+  // Get last N messages from DB
+  const dbRows = db.prepare(
+    'SELECT message_id, role, substr(content, 1, 60) as content, timestamp FROM conversation_log WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?'
+  ).all(chatId, CONSISTENCY_MSG_COUNT);
+  db.close();
+
+  const dbIds = new Set(dbRows.map(r => r.message_id));
+  const dbCount = dbRows.length;
+
+  // Get messages from Lark API (up to 2 pages of 50)
+  const larkResult = larkCliListMessages(chatId, 50);
+  if (!larkResult.ok) {
+    consistencyCache = { ok: false, error: larkResult.error?.message || 'lark_api_failed', chatId, checkedAt: now };
+    consistencyLastRun = now;
+    return consistencyCache;
+  }
+
+  let larkMessages = larkResult.data?.messages || [];
+
+  // Fetch page 2 if needed
+  if (larkResult.data?.has_more && larkMessages.length < CONSISTENCY_MSG_COUNT && larkResult.data?.page_token) {
+    try {
+      const env = { ...process.env, HOME: CONSISTENCY_LARK_HOME, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin' };
+      const out2 = execFileSync(LARK_CLI_BIN, [
+        'im', '+chat-messages-list',
+        '--chat-id', chatId,
+        '--as', 'bot',
+        '--page-size', '50',
+        '--sort', 'desc',
+        '--page-token', larkResult.data.page_token,
+        '--format', 'json',
+      ], { encoding: 'utf-8', timeout: 15000, env });
+      const page2 = JSON.parse(out2);
+      if (page2.ok && page2.data?.messages) {
+        larkMessages = larkMessages.concat(page2.data.messages);
+      }
+    } catch (_) {}
+  }
+
+  const larkIds = new Set(larkMessages.map(m => m.message_id));
+  const larkCount = larkMessages.length;
+
+  // Compare
+  const inDbNotLark = [...dbIds].filter(id => !larkIds.has(id));
+  const inLarkNotDb = [...larkIds].filter(id => !dbIds.has(id));
+  const matched = [...dbIds].filter(id => larkIds.has(id)).length;
+
+  // Role distribution
+  const dbUser = dbRows.filter(r => r.role === 'user').length;
+  const dbBot = dbRows.filter(r => r.role === 'assistant').length;
+  const larkUser = larkMessages.filter(m => m.sender?.sender_type === 'user').length;
+  const larkBot = larkMessages.filter(m => m.sender?.sender_type === 'app').length;
+
+  const isHealthy = inDbNotLark.length === 0 && inLarkNotDb.length === 0;
+
+  consistencyCache = {
+    ok: true,
+    healthy: isHealthy,
+    chatId,
+    checkedAt: now,
+    db: { total: dbCount, user: dbUser, bot: dbBot },
+    lark: { total: larkCount, user: larkUser, bot: larkBot },
+    matched,
+    inDbNotLark,
+    inLarkNotDb,
+  };
+  consistencyLastRun = now;
+  return consistencyCache;
 }
 
 // ── HTML page ─────────────────────────────────────────────────────────
@@ -418,6 +544,41 @@ function getHtmlPage() {
   }
   .toast.show { opacity: 1; transform: translateY(0); }
 
+  .consistency-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 0;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .consistency-status .icon { font-size: 20px; }
+  .consistency-detail {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .consistency-detail .cd-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .consistency-detail .cd-label { color: var(--text2); }
+  .consistency-detail .cd-val { font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+  .consistency-missing {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(248,113,113,0.1);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--red);
+    font-family: "SF Mono", Menlo, monospace;
+    word-break: break-all;
+  }
+
   .refresh-note {
     color: var(--text2);
     font-size: 11px;
@@ -438,6 +599,9 @@ function getHtmlPage() {
 
 <div class="section-title">路由规则</div>
 <div class="routing-card" id="routing"></div>
+
+<div class="section-title">消息一致性检查 <span style="font-size:12px;color:var(--text2)">(DB vs Lark API, 最近100条, 每60秒)</span></div>
+<div class="routing-card" id="consistency"></div>
 
 <div class="refresh-note" id="refreshNote"></div>
 <div class="toast" id="toast"></div>
@@ -569,8 +733,55 @@ async function refresh() {
   }
 }
 
+function renderConsistency(data) {
+  const el = document.getElementById('consistency');
+  if (!data || !data.ok) {
+    const errMsg = data?.error || 'loading...';
+    el.innerHTML = '<div class="consistency-status"><span class="icon">&#8987;</span> ' + errMsg + '</div>';
+    return;
+  }
+
+  const icon = data.healthy ? '&#9989;' : '&#10060;';
+  const label = data.healthy ? 'PASS — 完全一致' : 'MISMATCH — 数据不一致';
+  const labelColor = data.healthy ? 'var(--green)' : 'var(--red)';
+  const timeStr = new Date(data.checkedAt).toLocaleTimeString('zh-CN');
+
+  let html = '<div class="consistency-status">';
+  html += '<span class="icon">' + icon + '</span>';
+  html += '<span style="color:' + labelColor + '">' + label + '</span>';
+  html += '<span style="color:var(--text2);font-size:12px;margin-left:auto">chat: ' + (data.chatId || '-').slice(0, 20) + '... | ' + timeStr + '</span>';
+  html += '</div>';
+
+  html += '<div class="consistency-detail">';
+  html += '<div class="cd-item"><span class="cd-label">DB 总数</span><span class="cd-val">' + data.db.total + ' (user:' + data.db.user + ' bot:' + data.db.bot + ')</span></div>';
+  html += '<div class="cd-item"><span class="cd-label">Lark API 总数</span><span class="cd-val">' + data.lark.total + ' (user:' + data.lark.user + ' bot:' + data.lark.bot + ')</span></div>';
+  html += '<div class="cd-item"><span class="cd-label">匹配数</span><span class="cd-val" style="color:var(--green)">' + data.matched + ' / ' + data.db.total + '</span></div>';
+  html += '<div class="cd-item"><span class="cd-label">差异数</span><span class="cd-val" style="color:' + (data.inDbNotLark.length + data.inLarkNotDb.length > 0 ? 'var(--red)' : 'var(--green)') + '">' + (data.inDbNotLark.length + data.inLarkNotDb.length) + '</span></div>';
+  html += '</div>';
+
+  if (data.inDbNotLark.length > 0) {
+    html += '<div class="consistency-missing">DB 有但 Lark 无: ' + data.inDbNotLark.join(', ') + '</div>';
+  }
+  if (data.inLarkNotDb.length > 0) {
+    html += '<div class="consistency-missing">Lark 有但 DB 无: ' + data.inLarkNotDb.join(', ') + '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+async function refreshConsistency() {
+  try {
+    const data = await api('/api/consistency');
+    renderConsistency(data);
+  } catch (e) {
+    console.error('consistency check failed', e);
+  }
+}
+
 refresh();
 setInterval(refresh, 5000);
+refreshConsistency();
+setInterval(refreshConsistency, 60000);
 </script>
 </body>
 </html>`;
@@ -628,6 +839,11 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/routing' && method === 'POST') {
       const body = await readBody(req);
       return json(res, apiUpdateRouting(body));
+    }
+
+    if (pathname === '/api/consistency' && method === 'GET') {
+      const force = url.searchParams.get('force') === '1';
+      return json(res, apiConsistency(force));
     }
 
     // HTML page
