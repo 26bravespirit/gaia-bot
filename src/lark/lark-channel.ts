@@ -34,6 +34,7 @@ export class LarkChannel {
   private conflictResolver: ConflictResolver;
   private buffer = '';
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private spawning = false; // Mutex: prevent double subscribe spawn
 
   // Callback for incoming messages
   onMessage: ((msg: LarkMessage, appId: string) => void) | null = null;
@@ -95,6 +96,16 @@ export class LarkChannel {
   }
 
   private async spawnSubscribe(): Promise<void> {
+    if (this.spawning) {
+      logger.warn(`LarkChannel[${this.config.appId}]: spawnSubscribe skipped (already spawning)`);
+      return;
+    }
+    if (this.proc && this.proc.exitCode === null) {
+      logger.warn(`LarkChannel[${this.config.appId}]: killing existing subscribe pid=${this.proc.pid} before respawn`);
+      this.proc.kill('SIGTERM');
+      this.proc = null;
+    }
+    this.spawning = true;
     const binary = this.getBinary();
     const args = ['event', '+subscribe', '--as', 'bot', '--quiet'];
     const eventTypes = this.config.eventTypes || ['im.message.receive_v1'];
@@ -108,6 +119,7 @@ export class LarkChannel {
     this.proc = proc;
     this.state.subscribePid = proc.pid ?? null;
     this.buffer = '';
+    this.spawning = false;
 
     logger.info(`LarkChannel[${this.config.appId}]: subscribe started, pid=${proc.pid}`);
 
