@@ -19,6 +19,8 @@ export class PipelineRunner {
     messageType?: string;
     timestamp: number;
     mentions?: Array<Record<string, unknown>>;
+    coalescedCount?: number;
+    coalescedMessageIds?: string[];
   }): Promise<PipelineContext> {
     const ctx: PipelineContext = {
       rawMessageId: input.messageId,
@@ -31,6 +33,8 @@ export class PipelineRunner {
       rawMentions: input.mentions || [],
       mentionedBot: false,
       mentionedOther: false,
+      coalescedCount: input.coalescedCount,
+      coalescedMessageIds: input.coalescedMessageIds,
       config: {} as PersonaConfig,
       userProfile: null,
       history: [],

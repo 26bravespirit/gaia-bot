@@ -224,6 +224,11 @@ biography:
     max_generated_facts: 50
     min_confidence: 0.3
 
+message_coalescing:
+  quiet_window_ms: 4000              # 最后一条消息后等多久认为"说完了"
+  max_burst_wait_ms: 10000           # 用户持续连发时最多等多久
+  force_immediate_on_mention: true   # @bot 时跳过聚合立即回复
+
 human_behaviors:
   push_back: 0.12
   feign_confusion: 0.10

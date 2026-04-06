@@ -6,6 +6,7 @@ import { loadPersona, watchPersona, getPersona } from './config/persona-loader.j
 import { MemoryManager } from './memory/memory-manager.js';
 import { TimeEngine } from './engine/time-engine.js';
 import { IdentityGuardian } from './engine/identity-guardian.js';
+import { MessageCoalescer, type CoalescedMessage } from './engine/message-coalescer.js';
 import { eventBus } from './engine/event-bus.js';
 import { LarkClient } from './lark/lark-client.js';
 import { buildChannelManagerFromEnv } from './lark/channel-manager.js';
@@ -76,6 +77,72 @@ eventBus.subscribe('response_sent', (event) => {
   memory.updateSelfState({ socialBattery: newBattery });
 });
 
+// ── Bot mention detection (shared between coalescer & S1) ──
+const botOpenId = process.env.BOT_OPEN_ID?.trim() || '';
+const botMentionPatterns = (process.env.BOT_MENTION_PATTERNS || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+function isMentionedBot(mentions: Array<Record<string, unknown>>, text: string): boolean {
+  if (mentions.length > 0 && botOpenId) {
+    for (const m of mentions) {
+      const id = (m.id as Record<string, unknown>)?.open_id || m.open_id;
+      if (id === botOpenId) return true;
+    }
+  }
+  const lower = text.toLowerCase();
+  return botMentionPatterns.some(p => lower.includes(p));
+}
+
+// ── Pipeline execution (called by coalescer when burst is ready) ──
+async function runPipeline(burst: CoalescedMessage): Promise<void> {
+  try {
+    const result = await pipeline.run({
+      messageId: burst.messageId,
+      chatId: burst.chatId,
+      senderId: burst.senderId,
+      senderName: burst.senderName,
+      text: burst.text,
+      messageType: burst.messageType,
+      timestamp: burst.timestamp,
+      mentions: burst.mentions,
+      coalescedCount: burst.coalescedCount,
+      coalescedMessageIds: burst.messageIds,
+    });
+
+    if (result.deliveryStatus === 'sent') {
+      logger.info(`replied to [${burst.senderName}]: ${result.finalResponse.slice(0, 50)}...`);
+    } else if (result.skipReason) {
+      logger.debug(`skipped: ${result.skipReason}`);
+    }
+
+    if (result.pipelineTimings) {
+      try {
+        memory.working.getDb().prepare(
+          'INSERT INTO pipeline_timings (message_id, chat_id, sender_name, total_ms, stages, model, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          burst.messageId, burst.chatId, burst.senderName,
+          result.pipelineTimings.totalMs,
+          JSON.stringify(result.pipelineTimings.stages),
+          result.selectedModel || 'unknown',
+          Date.now()
+        );
+      } catch { /* non-fatal */ }
+    }
+  } catch (err) {
+    logger.error('Pipeline error', { error: String(err) });
+  }
+}
+
+// ── Message coalescer — groups rapid-fire messages before triggering pipeline ──
+const coalescer = new MessageCoalescer(
+  (burst) => { runPipeline(burst); },
+  () => ({
+    quietWindowMs: config.message_coalescing?.quiet_window_ms ?? 2000,
+    maxBurstWaitMs: config.message_coalescing?.max_burst_wait_ms ?? 8000,
+    forceImmediateOnMention: config.message_coalescing?.force_immediate_on_mention ?? true,
+  }),
+);
+
 // ── Message handler shared across all channels ──
 async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
   // Dedup
@@ -100,7 +167,7 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
     }
   }
 
-  // Record user message in memory
+  // Record user message in memory (per-message, before coalescing)
   const userMsg: Message = {
     id: msg.messageId,
     role: 'user',
@@ -120,42 +187,18 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
     text: msg.text,
   });
 
-  // Run pipeline
-  try {
-    const result = await pipeline.run({
-      messageId: msg.messageId,
-      chatId: msg.chatId,
-      senderId: msg.senderOpenId,
-      senderName: msg.senderName,
-      text: msg.text,
-      messageType: msg.messageType,
-      timestamp: Date.now(),
-      mentions: msg.mentions,
-    });
-
-    if (result.deliveryStatus === 'sent') {
-      logger.info(`replied to [${msg.senderName}]: ${result.finalResponse.slice(0, 50)}...`);
-    } else if (result.skipReason) {
-      logger.debug(`skipped: ${result.skipReason}`);
-    }
-
-    // Record pipeline timing metrics
-    if (result.pipelineTimings) {
-      try {
-        memory.working.getDb().prepare(
-          'INSERT INTO pipeline_timings (message_id, chat_id, sender_name, total_ms, stages, model, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)'
-        ).run(
-          msg.messageId, msg.chatId, msg.senderName,
-          result.pipelineTimings.totalMs,
-          JSON.stringify(result.pipelineTimings.stages),
-          result.selectedModel || 'unknown',
-          Date.now()
-        );
-      } catch { /* non-fatal */ }
-    }
-  } catch (err) {
-    logger.error('Pipeline error', { error: String(err) });
-  }
+  // Push to coalescer — pipeline runs when burst is ready
+  coalescer.push({
+    messageId: msg.messageId,
+    chatId: msg.chatId,
+    senderId: msg.senderOpenId,
+    senderName: msg.senderName,
+    text: msg.text,
+    messageType: msg.messageType,
+    timestamp: Date.now(),
+    mentions: msg.mentions,
+    mentionedBot: isMentionedBot(msg.mentions, msg.text),
+  });
 }
 
 // ── Main ──
@@ -221,6 +264,7 @@ async function main() {
     logger.info('Shutting down...');
     clearInterval(proactiveInterval);
     clearInterval(healthInterval);
+    coalescer.flushAll();
     await extractionScheduler.shutdown();
     await channelManager.shutdown();
     memory.close();

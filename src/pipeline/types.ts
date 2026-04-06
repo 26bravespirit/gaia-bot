@@ -59,6 +59,8 @@ export interface PipelineContext {
   rawMentions: Array<Record<string, unknown>>;
   mentionedBot: boolean;
   mentionedOther: boolean;
+  coalescedCount?: number;
+  coalescedMessageIds?: string[];
 
   // S2: Enriched context
   config: PersonaConfig;

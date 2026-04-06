@@ -210,6 +210,14 @@ const HumanBehaviorsSchema = z.object({
   mood_refusal: z.number().min(0).max(1).default(0),
 });
 
+// ── Message Coalescing Schema ──
+
+const MessageCoalescingSchema = z.object({
+  quiet_window_ms: z.number().min(500).max(10000).default(2000),
+  max_burst_wait_ms: z.number().min(2000).max(30000).default(8000),
+  force_immediate_on_mention: z.boolean().default(true),
+});
+
 // ── Anti-AI Config Schema (v0.2.0) ──
 
 const AntiAiConfigSchema = z.object({
@@ -237,6 +245,7 @@ export const PersonaConfigSchema = z.object({
   memory: MemorySchema.optional(),
   biography: BiographySchema.optional(),
   human_behaviors: HumanBehaviorsSchema.optional(),
+  message_coalescing: MessageCoalescingSchema.optional(),
   degradation: DegradationSchema.optional(),
   anti_ai: AntiAiConfigSchema.optional(),
   memory_blur: MemoryBlurConfigSchema.optional(),
@@ -258,3 +267,4 @@ export type BiographyConfig = z.infer<typeof BiographySchema>;
 export type HumanBehaviorsConfig = z.infer<typeof HumanBehaviorsSchema>;
 export type AntiAiConfig = z.infer<typeof AntiAiConfigSchema>;
 export type MemoryBlurConfig = z.infer<typeof MemoryBlurConfigSchema>;
+export type MessageCoalescingConfig = z.infer<typeof MessageCoalescingSchema>;
