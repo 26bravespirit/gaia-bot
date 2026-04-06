@@ -138,6 +138,21 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
     } else if (result.skipReason) {
       logger.debug(`skipped: ${result.skipReason}`);
     }
+
+    // Record pipeline timing metrics
+    if (result.pipelineTimings) {
+      try {
+        memory.working.getDb().prepare(
+          'INSERT INTO pipeline_timings (message_id, chat_id, sender_name, total_ms, stages, model, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          msg.messageId, msg.chatId, msg.senderName,
+          result.pipelineTimings.totalMs,
+          JSON.stringify(result.pipelineTimings.stages),
+          result.selectedModel || 'unknown',
+          Date.now()
+        );
+      } catch { /* non-fatal */ }
+    }
   } catch (err) {
     logger.error('Pipeline error', { error: String(err) });
   }

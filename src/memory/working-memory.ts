@@ -158,6 +158,19 @@ export class WorkingMemory {
       CREATE INDEX IF NOT EXISTS idx_ltm_type ON long_term_memories(type);
       CREATE INDEX IF NOT EXISTS idx_event_log_type ON event_log(event_type);
       CREATE INDEX IF NOT EXISTS idx_event_log_ts ON event_log(timestamp);
+
+      -- v0.2.1: Pipeline timing metrics
+      CREATE TABLE IF NOT EXISTS pipeline_timings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id TEXT,
+        chat_id TEXT,
+        sender_name TEXT,
+        total_ms INTEGER,
+        stages TEXT,
+        model TEXT,
+        timestamp INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_timing_ts ON pipeline_timings(timestamp);
     `);
 
     // v0.2.1 migration: add status column to long_term_memories for promise tracking

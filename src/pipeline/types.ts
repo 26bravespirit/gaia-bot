@@ -100,6 +100,9 @@ export interface PipelineContext {
   // S6: Delivery result
   deliveryMessageId?: string;
   deliveryStatus: 'pending' | 'sent' | 'failed';
+
+  // Pipeline timing metrics
+  pipelineTimings?: { totalMs: number; stages: Record<string, number> };
 }
 
 export interface PipelineStage {

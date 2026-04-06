@@ -53,6 +53,7 @@ export class PipelineRunner {
     };
 
     const startTime = Date.now();
+    const stageTimings: Record<string, number> = {};
 
     for (const stage of this.stages) {
       // v0.2.0: Skip S4.5 and S5.5 on degradation path
@@ -67,6 +68,7 @@ export class PipelineRunner {
         const stageStart = Date.now();
         await stage.execute(ctx);
         const stageMs = Date.now() - stageStart;
+        stageTimings[stage.name] = stageMs;
 
         if (stageMs > 5000) {
           logger.warn(`Pipeline slow stage: ${stage.name} took ${stageMs}ms`);
@@ -99,6 +101,9 @@ export class PipelineRunner {
 
     const totalMs = Date.now() - startTime;
     logger.debug(`Pipeline total: ${totalMs}ms, degraded=${!!ctx.isDegraded}, verdict=${ctx.antiAiVerdict || 'N/A'}`);
+
+    // Record pipeline timing for dashboard
+    ctx.pipelineTimings = { totalMs, stages: stageTimings };
 
     return ctx;
   }

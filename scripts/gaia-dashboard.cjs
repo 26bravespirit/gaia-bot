@@ -26,20 +26,12 @@ const DB_PATH = path.resolve(PROJECT_ROOT, 'data/persona.db');
 // ── channel metadata ──────────────────────────────────────────────────
 const CHANNELS = {
   feishu: {
-    label: '飞书 persona-bot',
+    label: 'Gaia Bot',
     configKey: 'channel_feishu_enabled',
-    appId: 'cli_a9470826ebf9dcb2',
-    brand: 'feishu',
-    larkHome: path.join(process.env.HOME, '.local/share/GGBot/home'),
+    appId: process.env.LARK_APP_ID || 'default',
+    brand: process.env.LARK_BRAND || 'lark',
+    larkHome: process.env.LARK_HOME || process.env.HOME,
     processPattern: 'node.*dist/index\\.js',
-  },
-  lark: {
-    label: 'Lark bot-worker',
-    configKey: 'channel_lark_enabled',
-    appId: 'cli_a94023f9bcb89ed2',
-    brand: 'lark',
-    larkHome: path.join(process.env.HOME, '.lark-cli'),
-    processPattern: 'python3.*worker\\.py',
   },
 };
 
@@ -56,10 +48,9 @@ function ensureDefaults() {
   );
   const now = Date.now();
   upsert.run('channel_feishu_enabled', 'true', now);
-  upsert.run('channel_lark_enabled', 'false', now);
   upsert.run(
     'routing_rules',
-    JSON.stringify({ default: 'feishu', mention_lark_cli: 'lark', mention_gaia: 'feishu' }),
+    JSON.stringify({ default: 'feishu' }),
     now
   );
   db.close();
@@ -438,7 +429,7 @@ function getHtmlPage() {
 <body>
 
 <h1>Gaia Dashboard</h1>
-<div class="subtitle"><span class="dot live"></span>双通道管理面板 &mdash; 每 5 秒自动刷新</div>
+<div class="subtitle"><span class="dot live"></span>管理面板 &mdash; 每 5 秒自动刷新</div>
 
 <div class="grid" id="channels"></div>
 
@@ -621,7 +612,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, apiStatus());
     }
 
-    const channelMatch = pathname.match(/^\/api\/channel\/(feishu|lark)\/(on|off)$/);
+    const channelMatch = pathname.match(/^\/api\/channel\/(feishu)\/(on|off)$/);
     if (channelMatch && method === 'POST') {
       return json(res, apiChannelToggle(channelMatch[1], channelMatch[2]));
     }
