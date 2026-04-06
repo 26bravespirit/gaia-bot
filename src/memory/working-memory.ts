@@ -159,6 +159,13 @@ export class WorkingMemory {
       CREATE INDEX IF NOT EXISTS idx_event_log_type ON event_log(event_type);
       CREATE INDEX IF NOT EXISTS idx_event_log_ts ON event_log(timestamp);
     `);
+
+    // v0.2.1 migration: add status column to long_term_memories for promise tracking
+    try {
+      this.db.exec(`ALTER TABLE long_term_memories ADD COLUMN status TEXT DEFAULT 'active'`);
+    } catch {
+      // Column already exists, ignore
+    }
   }
 
   // ── User Profiles ──

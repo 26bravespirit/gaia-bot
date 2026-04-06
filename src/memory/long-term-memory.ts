@@ -11,6 +11,7 @@ export interface LongTermMemory {
   retrievalCount: number;
   lastRetrievedAt?: number;
   isForgettable: boolean;
+  status?: 'active' | 'overridden' | 'fulfilled';
   createdAt: number;
 }
 
@@ -88,6 +89,25 @@ export class LongTermMemoryStore {
     return result.changes;
   }
 
+  /**
+   * Update promise status (active → overridden/fulfilled).
+   */
+  updatePromiseStatus(id: number, status: 'active' | 'overridden' | 'fulfilled'): void {
+    this.db.prepare('UPDATE long_term_memories SET status = ? WHERE id = ? AND type = ?')
+      .run(status, id, 'promise');
+    logger.info(`LTM: promise #${id} status → ${status}`);
+  }
+
+  /**
+   * Get active promises for a user.
+   */
+  getActivePromises(userId: string, limit: number = 10): LongTermMemory[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM long_term_memories WHERE user_id = ? AND type = 'promise' AND (status = 'active' OR status IS NULL) ORDER BY importance DESC LIMIT ?"
+    ).all(userId, limit) as Array<Record<string, unknown>>;
+    return rows.map(r => this.rowToMemory(r));
+  }
+
   private recordRetrieval(ids: number[]): void {
     const now = Date.now();
     const stmt = this.db.prepare(
@@ -109,6 +129,7 @@ export class LongTermMemoryStore {
       retrievalCount: row.retrieval_count as number,
       lastRetrievedAt: row.last_retrieved_at as number | undefined,
       isForgettable: (row.is_forgettable as number) === 1,
+      status: (row.status as string as LongTermMemory['status']) || 'active',
       createdAt: row.created_at as number,
     };
   }

@@ -14,11 +14,18 @@ export class S1MessageDispatcher implements PipelineStage {
   }
 
   async execute(ctx: PipelineContext): Promise<PipelineContext> {
-    // Filter: only handle text messages from users
+    // Handle non-text messages that couldn't be parsed
     if (!ctx.rawText) {
-      ctx.shouldReply = false;
-      ctx.skipReason = 'empty_text';
-      return ctx;
+      // If we know the message type, provide a contextual hint instead of silently skipping
+      const knownNonText = ['image', 'file', 'sticker', 'audio', 'media', 'share_chat'];
+      if (ctx.rawMessageType && knownNonText.includes(ctx.rawMessageType)) {
+        ctx.rawText = `[${ctx.rawMessageType === 'image' ? '图片' : ctx.rawMessageType === 'sticker' ? '表情包' : ctx.rawMessageType === 'file' ? '文件' : ctx.rawMessageType === 'audio' ? '语音' : ctx.rawMessageType}]`;
+        logger.info(`S1: non-text message type=${ctx.rawMessageType}, synthesized: ${ctx.rawText}`);
+      } else {
+        ctx.shouldReply = false;
+        ctx.skipReason = 'empty_text';
+        return ctx;
+      }
     }
 
     // Check bot self-message

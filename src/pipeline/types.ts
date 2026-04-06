@@ -54,6 +54,7 @@ export interface PipelineContext {
   rawSenderId: string;
   rawSenderName: string;
   rawText: string;
+  rawMessageType: string;
   rawTimestamp: number;
   rawMentions: Array<Record<string, unknown>>;
   mentionedBot: boolean;

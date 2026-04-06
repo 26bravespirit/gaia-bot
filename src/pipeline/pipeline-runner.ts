@@ -16,6 +16,7 @@ export class PipelineRunner {
     senderId: string;
     senderName: string;
     text: string;
+    messageType?: string;
     timestamp: number;
     mentions?: Array<Record<string, unknown>>;
   }): Promise<PipelineContext> {
@@ -25,6 +26,7 @@ export class PipelineRunner {
       rawSenderId: input.senderId,
       rawSenderName: input.senderName,
       rawText: input.text,
+      rawMessageType: input.messageType || 'text',
       rawTimestamp: input.timestamp,
       rawMentions: input.mentions || [],
       mentionedBot: false,

@@ -99,6 +99,19 @@ export class ProactiveInitiator {
         }
       }
 
+      // Check for unfulfilled promises as a trigger
+      if (!trigger) {
+        const activePromises = this.memory.longTerm.getActivePromises(user.user_id, 3);
+        if (activePromises.length > 0 && silenceHours >= 2) {
+          trigger = 'promise_followup';
+          const promise = activePromises[0];
+          templates = [
+            `对了，上次说的"${promise.content}"，你还需要我帮忙吗`,
+            `想起来上次聊到"${promise.content}"，后来怎么样了`,
+          ];
+        }
+      }
+
       if (!trigger) continue;
 
       // Don't fire during sleep mode

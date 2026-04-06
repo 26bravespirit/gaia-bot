@@ -241,6 +241,10 @@ export const PersonaConfigSchema = z.object({
   anti_ai: AntiAiConfigSchema.optional(),
   memory_blur: MemoryBlurConfigSchema.optional(),
   aliases: z.record(z.string()).optional(),
+  known_contacts: z.record(z.object({
+    role: z.string().default('同事'),
+    relationship_hint: z.string().optional(),
+  })).optional(),
 });
 
 export type PersonaConfig = z.infer<typeof PersonaConfigSchema>;
