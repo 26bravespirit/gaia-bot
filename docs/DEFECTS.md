@@ -118,6 +118,13 @@
 - **现象:** 口头禅在随机位置硬塞，短回复时尤其明显
 - **建议:** 只在句子边界且长度 >40 字时注入
 
+### DEF-O03: persona-bot subscribe 双重启动
+- **严重度:** P0
+- **文件:** persona-bot `src/lark/lark-channel.ts`
+- **现象:** reconnect 时 spawn 2 个 subscribe 进程，互相竞争同一个 appId WebSocket，导致反复 exit + 2 分钟消息丢失
+- **根因:** scheduleReconnect 被调用两次（可能两个 LarkChannel 实例或 close 事件触发两次）
+- **修复建议:** spawnSubscribe() 加互斥锁（if spawning return），确保同一时间只有一个 subscribe
+
 ### DEF-O02: persona-bot 未同步全部修复
 - **严重度:** P1
 - **路径:** persona-bot 项目（独立仓库）
