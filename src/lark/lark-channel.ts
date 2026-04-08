@@ -282,6 +282,7 @@ export class LarkChannel {
         'im', '+messages-send',
         '--chat-id', chatId,
         '--text', text,
+        '--as', 'bot',
       ], {
         encoding: 'utf-8',
         timeout: 15000,

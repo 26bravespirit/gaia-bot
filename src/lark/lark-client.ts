@@ -48,6 +48,7 @@ export class LarkClient {
         'im', '+messages-send',
         '--chat-id', chatId,
         '--text', text,
+        '--as', 'bot',
       ]);
       logger.debug('sendText result', { output: output.slice(0, 200) });
       try {
@@ -70,6 +71,7 @@ export class LarkClient {
         '--chat-id', chatId,
         '--msg-type', 'interactive',
         '--content', `'${content}'`,
+        '--as', 'bot',
       ]);
       try {
         const parsed = JSON.parse(output);
