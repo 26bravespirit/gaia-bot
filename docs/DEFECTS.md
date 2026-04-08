@@ -9,6 +9,18 @@
 
 ## FIXED
 
+### DEF-019: lark-cli 发消息身份回退到 user，导致全部出站失败
+- **日期:** 2026-04-08
+- **严重度:** P0
+- **文件:** `src/lark/lark-client.ts:45-83`, `src/lark/lark-channel.ts:279`
+- **现象:** 所有群（包括新拉的群）gaia-bot 不响应；日志 `sendText failed ... missing required scope(s): im:message.send_as_user`；S1/S3S4 均正常，仅 S6 投递失败
+- **根因:** `sendText` / `sendCard` 调 `lark-cli im +messages-send` 时未显式指定 `--as bot`，走 auto identity。为排查招聘卡片做了 `lark-cli auth login --domain im --recommend` 后 CLI 检测到 user token 即抢占使用，但该授权未含 `im:message.send_as_user` scope，于是每次发送都被拒
+- **修复:** 在 3 处 send 调用统一加 `--as bot`，强制 bot 身份发消息；user token 仅保留用于只读调研
+- **Commit:** d5d4e9a
+- **预防:** 所有 lark-cli 调用必须显式声明 `--as`，禁止 auto；新增 send 路径需 review identity 参数
+
+---
+
 ### DEF-001: LARK_HOME 路径错误
 - **日期:** 2026-04-05
 - **严重度:** P0
