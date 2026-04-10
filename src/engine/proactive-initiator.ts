@@ -44,6 +44,16 @@ export class ProactiveInitiator {
     return row?.c ?? 0;
   }
 
+  /** Check if the chat had any activity (any role) within the cooldown window. */
+  private isRecentlyActive(chatId: string, cooldownMinutes: number = 60): boolean {
+    const db = this.memory.working.getDb();
+    const since = Date.now() - cooldownMinutes * 60 * 1000;
+    const row = db.prepare(
+      'SELECT 1 FROM conversation_log WHERE chat_id = ? AND timestamp >= ? LIMIT 1',
+    ).get(chatId, since);
+    return !!row;
+  }
+
   /** Check if the last proactive message in a chat got no user response. */
   private hasUnansweredProactive(chatId: string): boolean {
     const db = this.memory.working.getDb();
@@ -90,6 +100,9 @@ export class ProactiveInitiator {
 
       // Guard 2: last proactive in this chat got no reply — don't pile on
       if (this.hasUnansweredProactive(chatId)) continue;
+
+      // Guard 3: conversation was active recently — give breathing room
+      if (this.isRecentlyActive(chatId, 60)) continue;
 
       // Check silence threshold
       const lastMsg = db.prepare(

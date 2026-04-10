@@ -35,6 +35,8 @@ export class S6OutboundScheduler implements PipelineStage {
     await new Promise(resolve => setTimeout(resolve, Math.min(delay, 3000)));
 
     // Send each segment as a separate message
+    // If the message originated from a thread, reply in-thread instead of main chat
+    const inThread = !!ctx.rawRootId;
     const sentIds: string[] = [];
     for (let i = 0; i < segments.length; i++) {
       if (i > 0) {
@@ -43,7 +45,9 @@ export class S6OutboundScheduler implements PipelineStage {
         await new Promise(resolve => setTimeout(resolve, typingDelay));
       }
 
-      const msgId = this.lark.sendText(ctx.rawChatId, segments[i]);
+      const msgId = inThread
+        ? this.lark.replyInThread(ctx.rawRootId!, segments[i])
+        : this.lark.sendText(ctx.rawChatId, segments[i]);
       if (msgId) sentIds.push(msgId);
     }
 

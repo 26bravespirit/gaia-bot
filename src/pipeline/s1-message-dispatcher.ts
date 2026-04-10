@@ -42,6 +42,14 @@ export class S1MessageDispatcher implements PipelineStage {
     const hasMentions = ctx.rawMentions.length > 0;
     ctx.mentionedOther = hasMentions && !ctx.mentionedBot;
 
+    // If the message @mentions others but NOT the bot, skip — don't interrupt others' conversations
+    if (ctx.mentionedOther) {
+      ctx.shouldReply = false;
+      ctx.skipReason = 'mention_other_user';
+      logger.debug(`S1: skipping — @mention targeted at other user(s), not bot`);
+      return ctx;
+    }
+
     // Clean @mention markers from text (handles multi-word like "@Lark CLI")
     for (const pattern of this.mentionPatterns) {
       const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -61,6 +61,8 @@ export interface PipelineContext {
   mentionedOther: boolean;
   coalescedCount?: number;
   coalescedMessageIds?: string[];
+  /** Thread root message ID — non-null when message is inside a Lark thread */
+  rawRootId: string | null;
 
   // S2: Enriched context
   config: PersonaConfig;

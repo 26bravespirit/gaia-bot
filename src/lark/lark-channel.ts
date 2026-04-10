@@ -166,6 +166,9 @@ export class LarkChannel {
           continue;
         }
 
+        // DIAG: capture raw payload to investigate phantom replay
+        logger.info(`RAW_EVENT: ${trimmed}`);
+
         const msg = extractLarkMessage(payload);
         if (!msg) continue;
 

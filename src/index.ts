@@ -107,6 +107,7 @@ async function runPipeline(burst: CoalescedMessage): Promise<void> {
       mentions: burst.mentions,
       coalescedCount: burst.coalescedCount,
       coalescedMessageIds: burst.messageIds,
+      rootId: burst.rootId,
     });
 
     if (result.deliveryStatus === 'sent') {
@@ -149,11 +150,31 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
   if (memory.isSeen(msg.messageId)) return;
   memory.markSeen(msg.messageId);
 
+  // Drop replayed stale messages (Lark replays missed events on reconnect)
+  const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+  if (Date.now() - msg.createTime > STALE_THRESHOLD_MS) {
+    logger.info('Dropped stale replayed message', {
+      messageId: msg.messageId,
+      createTime: new Date(msg.createTime).toISOString(),
+      ageMs: Date.now() - msg.createTime,
+    });
+    return;
+  }
+
   // Check if this channel is enabled via runtime_config
   const channelEnabled = memory.getRuntimeConfig('channel_feishu_enabled');
   if (channelEnabled === 'false') {
     logger.debug('Channel feishu disabled, skipping message');
     return;
+  }
+
+  // Fetch quoted message content and prepend to text
+  if (msg.parentId) {
+    const quoted = lark.getMessages([msg.parentId]).get(msg.parentId);
+    if (quoted) {
+      msg.text = `[引用: "${quoted}"]\n${msg.text}`;
+      logger.debug('Resolved quoted message', { parentId: msg.parentId, quoted: quoted.slice(0, 100) });
+    }
   }
 
   // Resolve sender name: event payload → SQLite cache → Lark API
@@ -174,7 +195,7 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
     content: msg.text,
     senderName: msg.senderName,
     senderId: msg.senderOpenId,
-    timestamp: Date.now(),
+    timestamp: msg.createTime,
     chatId: msg.chatId,
   };
   memory.addMessage(userMsg);
@@ -198,6 +219,7 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
     timestamp: Date.now(),
     mentions: msg.mentions,
     mentionedBot: isMentionedBot(msg.mentions, msg.text),
+    rootId: msg.rootId,
   });
 }
 

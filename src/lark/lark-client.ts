@@ -10,6 +10,12 @@ export interface LarkMessage {
   messageType: string;
   text: string;
   mentions: Array<Record<string, unknown>>;
+  /** Unix ms from Lark create_time; falls back to Date.now() if unavailable */
+  createTime: number;
+  /** ID of the message being quoted/replied to; null if not a quote */
+  parentId: string | null;
+  /** Root message ID of the thread; non-null when message is inside a thread */
+  rootId: string | null;
   raw: Record<string, unknown>;
 }
 
@@ -148,6 +154,31 @@ export class LarkClient {
     return null;
   }
 
+  /**
+   * Fetch message content by IDs (up to 50 at a time).
+   * Returns a map of message_id → plain text content.
+   */
+  getMessages(messageIds: string[]): Map<string, string> {
+    const result = new Map<string, string>();
+    if (messageIds.length === 0) return result;
+    try {
+      const output = this.runSync([
+        'im', '+messages-mget',
+        '--message-ids', messageIds.join(','),
+        '--as', 'bot',
+      ]);
+      const parsed = JSON.parse(output);
+      for (const m of (parsed?.data?.messages ?? []) as Array<Record<string, unknown>>) {
+        const id = m.message_id as string | undefined;
+        const content = m.content as string | undefined;
+        if (id && content) result.set(id, content);
+      }
+    } catch (err) {
+      logger.warn('getMessages failed', { ids: messageIds, error: String(err) });
+    }
+    return result;
+  }
+
   replyText(messageId: string, text: string): string | null {
     try {
       const output = this.runSync([
@@ -163,6 +194,28 @@ export class LarkClient {
       }
     } catch (err) {
       logger.error('replyText failed', { error: String(err) });
+      return null;
+    }
+  }
+
+  /** Reply in thread — message appears in thread stream instead of main chat */
+  replyInThread(rootMessageId: string, text: string): string | null {
+    try {
+      const output = this.runSync([
+        'im', '+messages-reply',
+        '--message-id', rootMessageId,
+        '--reply-in-thread',
+        '--text', text,
+        '--as', 'bot',
+      ]);
+      try {
+        const parsed = JSON.parse(output);
+        return parsed.data?.message_id || 'sent';
+      } catch {
+        return output ? 'sent' : null;
+      }
+    } catch (err) {
+      logger.error('replyInThread failed', { error: String(err) });
       return null;
     }
   }
@@ -311,6 +364,21 @@ export function extractLarkMessage(payload: Record<string, unknown>): LarkMessag
   // Extract mentions from event payload
   const mentions = dig(payload, ['event', 'message', 'mentions']) as Array<Record<string, unknown>> | undefined;
 
+  // Extract create_time (Lark sends unix ms as string)
+  const createTimeRaw = dig(payload, ['event', 'message', 'create_time']);
+  const createTime = typeof createTimeRaw === 'string' ? parseInt(createTimeRaw, 10) || Date.now()
+    : typeof createTimeRaw === 'number' ? createTimeRaw
+    : Date.now();
+
+  // Extract parent_id / root_id (present when message is inside a thread or quotes another)
+  const parentIdRaw = dig(payload, ['event', 'message', 'parent_id']);
+  const rootIdRaw = dig(payload, ['event', 'message', 'root_id']);
+  const rootId = typeof rootIdRaw === 'string' ? rootIdRaw : null;
+  // parentId is only set when quoting a specific message (parent != root means it's a nested quote)
+  const parentId = typeof parentIdRaw === 'string' && parentIdRaw !== rootIdRaw
+    ? parentIdRaw
+    : null;
+
   return {
     messageId,
     chatId,
@@ -320,6 +388,9 @@ export function extractLarkMessage(payload: Record<string, unknown>): LarkMessag
     messageType,
     text: text.trim(),
     mentions: mentions || [],
+    createTime,
+    parentId,
+    rootId,
     raw: payload,
   };
 }

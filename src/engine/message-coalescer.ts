@@ -11,6 +11,8 @@ export interface CoalescedMessage {
   mentions: Array<Record<string, unknown>>;
   coalescedCount: number;
   messageIds: string[];
+  /** Root thread message ID — non-null when the burst started inside a thread */
+  rootId: string | null;
 }
 
 interface BurstMessage {
@@ -28,6 +30,7 @@ interface PendingBurst {
   messages: BurstMessage[];
   firstTs: number;
   timer: ReturnType<typeof setTimeout>;
+  rootId: string | null;
 }
 
 export interface CoalescerConfig {
@@ -65,6 +68,7 @@ export class MessageCoalescer {
     timestamp: number;
     mentions: Array<Record<string, unknown>>;
     mentionedBot: boolean;
+    rootId: string | null;
   }): void {
     const cfg = this.getConfig();
     const key = `${msg.chatId}:${msg.senderId}`;
@@ -96,6 +100,7 @@ export class MessageCoalescer {
           mentions: msg.mentions,
           coalescedCount: 1,
           messageIds: [msg.messageId],
+          rootId: msg.rootId,
         });
       }
       return;
@@ -112,6 +117,8 @@ export class MessageCoalescer {
         messageType: msg.messageType,
       });
       if (msg.senderName) existing.senderName = msg.senderName;
+      // Promote rootId if the incoming message has thread context and burst doesn't yet
+      if (msg.rootId && !existing.rootId) existing.rootId = msg.rootId;
 
       // maxBurstWait exceeded → fire immediately
       if (Date.now() - existing.firstTs >= cfg.maxBurstWaitMs) {
@@ -140,6 +147,7 @@ export class MessageCoalescer {
           messageType: msg.messageType,
         }],
         firstTs: Date.now(),
+        rootId: msg.rootId,
         timer: setTimeout(() => {
           this.pending.delete(key);
           this.fireBurst(burst);
@@ -184,6 +192,7 @@ export class MessageCoalescer {
       mentions: uniqueMentions,
       coalescedCount: msgs.length,
       messageIds: msgs.map(m => m.messageId),
+      rootId: burst.rootId,
     });
   }
 

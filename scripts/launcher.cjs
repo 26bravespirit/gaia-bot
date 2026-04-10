@@ -14,19 +14,30 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const os = require('os');
+const { execSync, spawn } = require('child_process');
 
 const PORT = 3400;
+const PM2_BIN = (() => {
+  try { return execSync('which pm2', { encoding: 'utf-8' }).trim(); } catch {}
+  try { return execSync('which npx', { encoding: 'utf-8' }).trim() + ' pm2'; } catch {}
+  return 'npx pm2';
+})();
+const PLIST_PATH = path.join(os.homedir(), 'Library/LaunchAgents/com.gaia.pm2.plist');
 
 // Bot DB paths (auto-discovered from PM2 cwd)
 const BOT_CONFIGS = {
   'gaia-bot': {
     db: path.resolve(__dirname, '../data/persona.db'),
     log: path.resolve(__dirname, '../logs/persona-bot.log'),
+    ecosystem: path.resolve(__dirname, '../ecosystem.config.cjs'),
+    scheduleKey: 'schedule_shutdown',
   },
   'persona-bot': {
     db: process.env.PERSONA_BOT_DB || path.join(process.env.HOME, '本地文档/claude code/对话服务/persona-bot/data/persona.db'),
     log: process.env.PERSONA_BOT_LOG || path.join(process.env.HOME, '本地文档/claude code/对话服务/persona-bot/logs/persona-bot.log'),
+    ecosystem: process.env.PERSONA_BOT_ECOSYSTEM || path.join(process.env.HOME, '本地文档/claude code/对话服务/persona-bot/ecosystem.config.cjs'),
+    scheduleKey: 'schedule_shutdown',
   },
 };
 
@@ -82,6 +93,216 @@ function apiPm2() {
     memory: p.monit?.memory ? (p.monit.memory / 1024 / 1024).toFixed(1) : '-',
     cpu: p.monit?.cpu !== undefined ? p.monit.cpu : '-',
   }));
+}
+
+// ── Process control (PM2 wrappers) ────────────────────────────────────
+
+function pm2Exec(args) {
+  try {
+    const cmd = `${PM2_BIN} ${args}`;
+    execSync(cmd, { encoding: 'utf-8', timeout: 15000,
+      env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin' } });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e).slice(0, 200) };
+  }
+}
+
+function apiStart(botName) {
+  const cfg = BOT_CONFIGS[botName];
+  if (!cfg) return { ok: false, error: 'unknown bot' };
+  if (!fs.existsSync(cfg.ecosystem)) return { ok: false, error: 'ecosystem config not found: ' + cfg.ecosystem };
+  // pm2 start will no-op if already online; use --only to target specific app
+  return pm2Exec(`start "${cfg.ecosystem}" --only ${botName}`);
+}
+
+function apiStop(botName) {
+  if (!BOT_CONFIGS[botName]) return { ok: false, error: 'unknown bot' };
+  return pm2Exec(`stop ${botName}`);
+}
+
+function apiRestart(botName) {
+  const cfg = BOT_CONFIGS[botName];
+  if (!cfg) return { ok: false, error: 'unknown bot' };
+  // If not in PM2 yet, start it first
+  const list = getPm2List();
+  const exists = list.some(p => p.name === botName);
+  if (!exists) return apiStart(botName);
+  return pm2Exec(`restart ${botName}`);
+}
+
+function apiDelete(botName) {
+  if (!BOT_CONFIGS[botName]) return { ok: false, error: 'unknown bot' };
+  return pm2Exec(`delete ${botName}`);
+}
+
+// ── Autostart (user-level launchd) ───────────────────────────────────
+
+function buildPlist() {
+  const nodeBin = process.execPath;
+  const pm2Main = (() => {
+    try { return execSync('node -e "console.log(require.resolve(\'pm2/bin/pm2\'))"', { encoding: 'utf-8' }).trim(); }
+    catch { return '/opt/homebrew/lib/node_modules/pm2/bin/pm2'; }
+  })();
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gaia.pm2</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${nodeBin}</string>
+    <string>${pm2Main}</string>
+    <string>resurrect</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>${os.homedir()}</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${path.join(os.homedir(), '.pm2/logs/resurrect.log')}</string>
+  <key>StandardErrorPath</key>
+  <string>${path.join(os.homedir(), '.pm2/logs/resurrect-err.log')}</string>
+</dict>
+</plist>`;
+}
+
+function apiAutostartStatus() {
+  const exists = fs.existsSync(PLIST_PATH);
+  let loaded = false;
+  if (exists) {
+    try {
+      const out = execSync('launchctl list 2>/dev/null', { encoding: 'utf-8', timeout: 3000 });
+      loaded = out.includes('com.gaia.pm2');
+    } catch {}
+  }
+  return { enabled: exists && loaded, plistExists: exists, loaded };
+}
+
+function apiAutostartEnable() {
+  try {
+    // Save current PM2 process list first
+    pm2Exec('save --force');
+    // Write plist
+    fs.mkdirSync(path.dirname(PLIST_PATH), { recursive: true });
+    fs.writeFileSync(PLIST_PATH, buildPlist(), 'utf-8');
+    // Unload first (ignore error if not loaded)
+    try { execSync(`launchctl unload "${PLIST_PATH}" 2>/dev/null`, { timeout: 5000 }); } catch {}
+    execSync(`launchctl load "${PLIST_PATH}"`, { encoding: 'utf-8', timeout: 5000 });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e.message).slice(0, 300) };
+  }
+}
+
+function apiAutostartDisable() {
+  try {
+    if (fs.existsSync(PLIST_PATH)) {
+      try { execSync(`launchctl unload "${PLIST_PATH}" 2>/dev/null`, { timeout: 5000 }); } catch {}
+      fs.unlinkSync(PLIST_PATH);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e.message).slice(0, 300) };
+  }
+}
+
+// ── Schedule shutdown ─────────────────────────────────────────────────
+
+// In-memory timers: botName -> { type, timer }
+const scheduleTimers = {};
+
+function getScheduleDb(botName) {
+  const cfg = BOT_CONFIGS[botName];
+  if (!cfg || !Database || !fs.existsSync(cfg.db)) return null;
+  try { return new Database(cfg.db); } catch { return null; }
+}
+
+function readSchedule(botName) {
+  const db = getScheduleDb(botName);
+  if (!db) return { type: 'none' };
+  try {
+    const row = db.prepare('SELECT value FROM runtime_config WHERE key = ?').get(BOT_CONFIGS[botName].scheduleKey);
+    db.close();
+    return row ? JSON.parse(row.value) : { type: 'none' };
+  } catch { db.close(); return { type: 'none' }; }
+}
+
+function writeSchedule(botName, sched) {
+  const db = getScheduleDb(botName);
+  if (!db) return false;
+  try {
+    db.prepare(`INSERT INTO runtime_config (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
+      .run(BOT_CONFIGS[botName].scheduleKey, JSON.stringify(sched), Date.now());
+    db.close();
+    return true;
+  } catch { db.close(); return false; }
+}
+
+function clearScheduleTimer(botName) {
+  const existing = scheduleTimers[botName];
+  if (existing?.timer) clearTimeout(existing.timer);
+  delete scheduleTimers[botName];
+}
+
+function applySchedule(botName, sched) {
+  clearScheduleTimer(botName);
+  if (sched.type === 'none') return;
+
+  const fireStop = () => {
+    console.log(`[schedule] stopping ${botName} by schedule (type=${sched.type})`);
+    pm2Exec(`stop ${botName}`);
+    // Reset to none after firing
+    writeSchedule(botName, { type: 'none' });
+    delete scheduleTimers[botName];
+  };
+
+  if (sched.type === 'delay') {
+    const ms = sched.until - Date.now();
+    if (ms <= 0) return fireStop();
+    scheduleTimers[botName] = { type: 'delay', timer: setTimeout(fireStop, ms) };
+    return;
+  }
+
+  if (sched.type === 'daily') {
+    // Check every minute
+    const checkDaily = () => {
+      const now = new Date();
+      const [hh, mm] = (sched.time || '22:00').split(':').map(Number);
+      if (now.getHours() === hh && now.getMinutes() === mm) return fireStop();
+      // Re-arm for next minute; don't reset type so it repeats daily
+    };
+    const dailyInterval = setInterval(checkDaily, 60_000);
+    scheduleTimers[botName] = { type: 'daily', timer: dailyInterval };
+  }
+}
+
+function loadAllSchedules() {
+  for (const name of Object.keys(BOT_CONFIGS)) {
+    try {
+      const sched = readSchedule(name);
+      if (sched.type !== 'none') applySchedule(name, sched);
+    } catch {}
+  }
+}
+
+function apiGetSchedule(botName) {
+  if (!BOT_CONFIGS[botName]) return { type: 'none' };
+  return readSchedule(botName);
+}
+
+function apiSetSchedule(botName, sched) {
+  if (!BOT_CONFIGS[botName]) return { ok: false, error: 'unknown bot' };
+  const ok = writeSchedule(botName, sched);
+  if (ok) applySchedule(botName, sched);
+  return { ok };
 }
 
 function apiMemory(botName) {
@@ -229,9 +450,52 @@ td{padding:6px 8px;border-bottom:1px solid #1f1f23}
 .err-row{padding:8px;background:#1c1917;border-radius:6px;margin-bottom:6px;font-size:12px;font-family:'SF Mono',monospace;color:#fca5a5}
 
 .footer{text-align:center;color:#27272a;font-size:11px;margin-top:32px}
+
+/* Control buttons */
+.ctrl-row{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+.ctrl-btn{display:flex;align-items:center;gap:5px;padding:6px 14px;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;font-family:inherit}
+.ctrl-btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
+.ctrl-btn:not(:disabled):hover{filter:brightness(1.15);transform:translateY(-1px)}
+.ctrl-btn:not(:disabled):active{transform:translateY(0)}
+.ctrl-btn.start{background:rgba(34,197,94,.15);color:#22c55e}
+.ctrl-btn.stop{background:rgba(239,68,68,.15);color:#ef4444}
+.ctrl-btn.restart{background:rgba(59,130,246,.15);color:#3b82f6}
+.ctrl-btn.loading{opacity:.6;cursor:wait}
+
+/* Advanced panel */
+.adv-toggle{display:flex;align-items:center;gap:6px;margin-top:12px;color:#52525b;font-size:12px;cursor:pointer;user-select:none;background:none;border:none;font-family:inherit;padding:0}
+.adv-toggle:hover{color:#71717a}
+.adv-panel{display:none;margin-top:12px;border-top:1px solid #27272a;padding-top:12px}
+.adv-panel.open{display:block}
+
+/* Toggle switch */
+.sw-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1f1f23}
+.sw-row:last-child{border:none}
+.sw-label{font-size:13px;color:#a1a1aa}
+.sw-sub{font-size:11px;color:#52525b;margin-top:2px}
+.switch{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;background:#27272a;border-radius:20px;transition:.2s;cursor:pointer}
+.slider:before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;background:#71717a;border-radius:50%;transition:.2s}
+input:checked+.slider{background:rgba(34,197,94,.3)}
+input:checked+.slider:before{background:#22c55e;transform:translateX(16px)}
+
+/* Schedule */
+.sched-options{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.sched-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:#a1a1aa;cursor:pointer}
+.sched-opt input[type=radio]{accent-color:#3b82f6}
+.sched-input{background:#1f1f23;border:1px solid #27272a;border-radius:6px;color:#e4e4e7;padding:3px 8px;font-size:12px;font-family:'SF Mono',monospace;width:90px}
+.sched-input:focus{outline:none;border-color:#3b82f6}
+.sched-save{margin-top:10px;padding:5px 16px;background:rgba(59,130,246,.15);color:#3b82f6;border:none;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s}
+.sched-save:hover{filter:brightness(1.2)}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;background:#27272a;border:1px solid #3f3f46;color:#e4e4e7;padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;z-index:999}
+.toast.show{opacity:1;transform:translateY(0)}
 </style>
 </head>
 <body>
+<div class="toast" id="toast"></div>
 <div class="container">
 <h1>Gaia Control Center</h1>
 <p class="sub"><span class="dot"></span>All bots &mdash; auto-refresh 5s</p>
@@ -278,7 +542,25 @@ let currentBot = '';
 let logLines = [];
 let logFilter = {info:true,warn:true,error:true};
 let evtSource = null;
+// advOpen state persisted in localStorage so 5s DOM rebuild doesn't reset it
+const botSchedState = {}; // botName -> {type,time,hours}
 
+function isAdvOpen(name) { try { return localStorage.getItem('adv_'+name)==='1'; } catch { return false; } }
+function setAdvOpen(name, v) { try { localStorage.setItem('adv_'+name, v?'1':'0'); } catch {} }
+
+// ── Toast ──────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, isErr) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.borderColor = isErr ? '#7f1d1d' : '#3f3f46';
+  el.style.color = isErr ? '#fca5a5' : '#e4e4e7';
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Tabs / panels ──────────────────────────────────────────────────────
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -294,6 +576,7 @@ function selectBot(name) {
   connectSSE();
 }
 
+// ── SSE / logs ─────────────────────────────────────────────────────────
 function connectSSE() {
   if (evtSource) evtSource.close();
   if (!currentBot) return;
@@ -324,24 +607,154 @@ function updateLogFilter() {
   renderLogs();
 }
 
-function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+// ── Process control ────────────────────────────────────────────────────
+async function botAction(botName, action, btn) {
+  btn.disabled = true;
+  btn.classList.add('loading');
+  const orig = btn.textContent;
+  btn.textContent = '...';
+  try {
+    const r = await fetch('/api/bot/'+botName+'/'+action, { method:'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      toast(botName + ' ' + action + ' OK');
+      setTimeout(refresh, 1200);
+    } else {
+      toast(d.error || 'failed', true);
+      btn.disabled = false;
+      btn.classList.remove('loading');
+      btn.textContent = orig;
+    }
+  } catch(e) {
+    toast(String(e), true);
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.textContent = orig;
+  }
+}
+
+// ── Autostart ──────────────────────────────────────────────────────────
+async function toggleAutostart(botName, cb) {
+  const enable = cb.checked;
+  cb.disabled = true;
+  try {
+    const r = await fetch('/api/autostart/'+(enable?'enable':'disable'), { method:'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      toast('随系统启动 '+(enable?'已开启':'已关闭'));
+    } else {
+      toast(d.error || 'failed', true);
+      cb.checked = !enable; // revert
+    }
+  } catch(e) {
+    toast(String(e), true);
+    cb.checked = !enable;
+  }
+  cb.disabled = false;
+}
+
+// ── Schedule ───────────────────────────────────────────────────────────
+async function saveSchedule(botName) {
+  const state = botSchedState[botName] || {};
+  const type = document.querySelector('input[name="sched_'+botName+'"]:checked')?.value || 'none';
+  let sched = { type };
+  if (type === 'daily') {
+    sched.time = document.getElementById('sched_time_'+botName)?.value || '22:00';
+  }
+  if (type === 'delay') {
+    const h = parseFloat(document.getElementById('sched_hours_'+botName)?.value || '2');
+    sched.until = Date.now() + h * 3600_000;
+    sched.hours = h;
+  }
+  try {
+    const r = await fetch('/api/schedule/'+botName, { method:'POST', body: JSON.stringify(sched), headers:{'Content-Type':'application/json'} });
+    const d = await r.json();
+    toast(d.ok ? '定时已保存' : (d.error||'failed'), !d.ok);
+  } catch(e) { toast(String(e), true); }
+}
+
+function toggleAdv(botName) {
+  const next = !isAdvOpen(botName);
+  setAdvOpen(botName, next);
+  const panel = document.getElementById('adv_'+botName);
+  const btn   = document.getElementById('advbtn_'+botName);
+  if (panel) panel.classList.toggle('open', next);
+  if (btn) btn.textContent = (next ? '▴' : '▾') + ' 自动 & 定时';
+}
+
+// ── Render bot cards ───────────────────────────────────────────────────
+async function renderBotCards(bots) {
+  // Fetch autostart status once
+  let autoEnabled = false;
+  try { autoEnabled = (await (await fetch('/api/autostart')).json()).enabled; } catch {}
+
+  let html = '';
+  for (const b of bots) {
+    const on = b.status === 'online';
+    const stopped = b.status === 'stopped';
+    const name = b.name;
+
+    // Fetch schedule for this bot
+    let sched = { type: 'none' };
+    try { sched = await (await fetch('/api/schedule/'+name)).json(); } catch {}
+    botSchedState[name] = sched;
+
+    html += '<div class="bot-card">';
+    html += '<h2>'+escHtml(name)+' <span class="badge '+(on?'on':'off')+'">'+(on?'ONLINE':'OFFLINE')+'</span></h2>';
+    html += '<div class="row"><span class="k">PID</span><span class="v">'+(b.pid||'-')+'</span></div>';
+    html += '<div class="row"><span class="k">Uptime</span><span class="v">'+b.uptime+'</span></div>';
+    html += '<div class="row"><span class="k">Restarts</span><span class="v">'+b.restarts+'</span></div>';
+    html += '<div class="row"><span class="k">Memory</span><span class="v">'+b.memory+' MB</span></div>';
+    html += '<div class="row"><span class="k">CPU</span><span class="v">'+b.cpu+'%</span></div>';
+
+    // Control buttons
+    const dn = escHtml(name);
+    html += '<div class="ctrl-row">';
+    html += '<button class="ctrl-btn start" data-bot="'+dn+'" data-act="start" '+(on?'disabled':'')+' onclick="botAction(this.dataset.bot,this.dataset.act,this)">▶ 启动</button>';
+    html += '<button class="ctrl-btn stop"  data-bot="'+dn+'" data-act="stop"  '+(!on?'disabled':'')+' onclick="botAction(this.dataset.bot,this.dataset.act,this)">■ 停止</button>';
+    html += '<button class="ctrl-btn restart" data-bot="'+dn+'" data-act="restart" '+((!on&&!stopped)?'disabled':'')+' onclick="botAction(this.dataset.bot,this.dataset.act,this)">↺ 重启</button>';
+    html += '</div>';
+
+    // Advanced toggle
+    const isOpen = isAdvOpen(name);
+    html += '<button class="adv-toggle" id="advbtn_'+dn+'" data-bot="'+dn+'" onclick="toggleAdv(this.dataset.bot)">'+(isOpen?'▴':'▾')+' 自动 & 定时</button>';
+    html += '<div class="adv-panel'+(isOpen?' open':'')+'" id="adv_'+dn+'">';
+
+    // Autostart row (shared — controls PM2 resurrect globally)
+    html += '<div class="sw-row">';
+    html += '<div><div class="sw-label">随系统启动</div><div class="sw-sub">开机自动运行所有 PM2 进程</div></div>';
+    html += '<label class="switch"><input type="checkbox" '+(autoEnabled?'checked':'')+' data-bot="'+dn+'" onchange="toggleAutostart(this.dataset.bot,this)"><span class="slider"></span></label>';
+    html += '</div>';
+
+    // Schedule rows
+    const schedType = sched.type || 'none';
+    const schedTime = sched.time || '22:00';
+    const schedHours = sched.hours || 2;
+    html += '<div style="margin-top:10px;font-size:12px;color:#52525b;margin-bottom:4px">定时关闭</div>';
+    html += '<div class="sched-options">';
+    html += '<label class="sched-opt"><input type="radio" name="sched_'+dn+'" value="none" '+(schedType==='none'?'checked':'')+'>不启用</label>';
+    html += '<label class="sched-opt"><input type="radio" name="sched_'+dn+'" value="daily" '+(schedType==='daily'?'checked':'')+'>每天定时&nbsp;<input class="sched-input" id="sched_time_'+dn+'" type="time" value="'+schedTime+'" style="width:80px"></label>';
+    html += '<label class="sched-opt"><input type="radio" name="sched_'+dn+'" value="delay" '+(schedType==='delay'?'checked':'')+'>延时关闭&nbsp;<input class="sched-input" id="sched_hours_'+dn+'" type="number" min="0.5" max="24" step="0.5" value="'+schedHours+'" style="width:60px">&nbsp;小时后</label>';
+    html += '</div>';
+    html += '<button class="sched-save" data-bot="'+dn+'" onclick="saveSchedule(this.dataset.bot)">保存定时</button>';
+
+    html += '</div>'; // adv-panel
+    html += '</div>'; // bot-card
+  }
+  document.getElementById('bots').innerHTML = html;
+}
+
+// ── Main refresh ───────────────────────────────────────────────────────
 async function refresh() {
   try {
     const bots = await (await fetch('/api/pm2')).json();
-    let html = '';
     let selectHtml = '';
     for (const b of bots) {
-      const on = b.status === 'online';
-      html += '<div class="bot-card"><h2>'+b.name+' <span class="badge '+(on?'on':'off')+'">'+(on?'ONLINE':'OFFLINE')+'</span></h2>';
-      html += '<div class="row"><span class="k">PID</span><span class="v">'+b.pid+'</span></div>';
-      html += '<div class="row"><span class="k">Uptime</span><span class="v">'+b.uptime+'</span></div>';
-      html += '<div class="row"><span class="k">Restarts</span><span class="v">'+b.restarts+'</span></div>';
-      html += '<div class="row"><span class="k">Memory</span><span class="v">'+b.memory+' MB</span></div>';
-      html += '<div class="row"><span class="k">CPU</span><span class="v">'+b.cpu+'%</span></div></div>';
-      selectHtml += '<button data-bot="'+b.name+'" onclick="selectBot(\\''+b.name+'\\')" class="'+(b.name===currentBot?'active':'')+'">'+b.name+'</button>';
+      selectHtml += '<button data-bot="'+escHtml(b.name)+'" onclick="selectBot(this.dataset.bot)" class="'+(b.name===currentBot?'active':'')+'">'+escHtml(b.name)+'</button>';
     }
-    document.getElementById('bots').innerHTML = html;
+    await renderBotCards(bots);
     document.getElementById('botSelect').innerHTML = selectHtml;
     if (!currentBot && bots.length) selectBot(bots[0].name);
     else refreshPanels();
@@ -367,7 +780,7 @@ async function refreshPanels() {
       for (const [stage, ms] of Object.entries(t.stages)) {
         const pct = Math.max((ms/maxMs)*100, 3);
         const cls = stageMap[stage] || 's2';
-        bars += '<div class="wf-bar '+cls+'" style="width:'+pct+'%" title="'+stage+': '+ms+'ms">'+( ms>200?ms+'':'')+'</div>';
+        bars += '<div class="wf-bar '+cls+'" style="width:'+pct+'%" title="'+stage+': '+ms+'ms">'+(ms>200?ms+'':'')+'</div>';
       }
       wf += '<div class="wf-row"><span class="wf-sender">'+(t.sender_name||'?')+'</span><div class="wf-bars">'+bars+'</div><span class="wf-total">'+t.total_ms+'ms</span></div>';
     }
@@ -384,7 +797,6 @@ async function refreshPanels() {
     h += '<div class="mem-card yellow"><div class="num">'+(typeof ss.mood_baseline==='number'?ss.mood_baseline.toFixed(2):'-')+'</div><div class="lbl">Mood</div></div>';
     h += '<div class="mem-card purple"><div class="num">'+(typeof ss.social_battery==='number'?ss.social_battery.toFixed(2):'-')+'</div><div class="lbl">Battery</div></div>';
     h += '</div>';
-
     if (mem.users?.length) {
       h += '<h3 style="font-size:14px;color:#a1a1aa;margin:12px 0 8px">Users</h3><table><tr><th>Name</th><th>Messages</th><th>Stage</th><th>Intimacy</th></tr>';
       const relMap = {};
@@ -395,7 +807,6 @@ async function refreshPanels() {
       }
       h += '</table>';
     }
-
     if (mem.promises?.length) {
       h += '<h3 style="font-size:14px;color:#a1a1aa;margin:12px 0 8px">Active Promises</h3>';
       for (const p of mem.promises) {
@@ -420,11 +831,10 @@ async function refreshPanels() {
   } catch {}
 }
 
-// Initial load + auto-refresh
+// ── Init ───────────────────────────────────────────────────────────────
 refresh();
 setInterval(refresh, 5000);
 
-// Load initial logs
 (async () => {
   if (!currentBot) return;
   try {
@@ -441,6 +851,7 @@ setInterval(refresh, 5000);
 // ── HTTP Server ──
 
 startLogWatchers();
+loadAllSchedules();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -453,6 +864,53 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/pm2') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(apiPm2()));
+  }
+
+  // API: Bot process control (start / stop / restart / delete)
+  const ctrlMatch = p.match(/^\/api\/bot\/([^/]+)\/(start|stop|restart|delete)$/);
+  if (ctrlMatch && req.method === 'POST') {
+    const [, botName, action] = ctrlMatch;
+    let result;
+    if (action === 'start')   result = apiStart(botName);
+    if (action === 'stop')    result = apiStop(botName);
+    if (action === 'restart') result = apiRestart(botName);
+    if (action === 'delete')  result = apiDelete(botName);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(result));
+  }
+
+  // API: Autostart
+  if (p === '/api/autostart') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(apiAutostartStatus()));
+  }
+  const autostartMatch = p.match(/^\/api\/autostart\/(enable|disable)$/);
+  if (autostartMatch && req.method === 'POST') {
+    const result = autostartMatch[1] === 'enable' ? apiAutostartEnable() : apiAutostartDisable();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(result));
+  }
+
+  // API: Schedule shutdown
+  const schedGetMatch = p.match(/^\/api\/schedule\/([^/]+)$/);
+  if (schedGetMatch && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(apiGetSchedule(schedGetMatch[1])));
+  }
+  if (schedGetMatch && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const sched = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(apiSetSchedule(schedGetMatch[1], sched)));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+      }
+    });
+    return;
   }
 
   // API: Memory for a bot
