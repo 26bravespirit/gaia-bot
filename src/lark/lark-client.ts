@@ -16,6 +16,8 @@ export interface LarkMessage {
   parentId: string | null;
   /** Root message ID of the thread; non-null when message is inside a thread */
   rootId: string | null;
+  /** Chat type: 'p2p' for direct message, 'group' for group chat */
+  chatType: string;
   raw: Record<string, unknown>;
 }
 
@@ -370,6 +372,10 @@ export function extractLarkMessage(payload: Record<string, unknown>): LarkMessag
     : typeof createTimeRaw === 'number' ? createTimeRaw
     : Date.now();
 
+  // Chat type (p2p or group)
+  const chatTypeRaw = dig(payload, ['event', 'message', 'chat_type']);
+  const chatType = typeof chatTypeRaw === 'string' ? chatTypeRaw : 'group';
+
   // Extract parent_id / root_id (present when message is inside a thread or quotes another)
   const parentIdRaw = dig(payload, ['event', 'message', 'parent_id']);
   const rootIdRaw = dig(payload, ['event', 'message', 'root_id']);
@@ -391,6 +397,7 @@ export function extractLarkMessage(payload: Record<string, unknown>): LarkMessag
     createTime,
     parentId,
     rootId,
+    chatType,
     raw: payload,
   };
 }

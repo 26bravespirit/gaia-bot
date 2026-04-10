@@ -63,6 +63,8 @@ export interface PipelineContext {
   coalescedMessageIds?: string[];
   /** Thread root message ID — non-null when message is inside a Lark thread */
   rawRootId: string | null;
+  /** Chat type: 'p2p' or 'group' */
+  rawChatType: string;
 
   // S2: Enriched context
   config: PersonaConfig;

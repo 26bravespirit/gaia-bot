@@ -108,6 +108,7 @@ async function runPipeline(burst: CoalescedMessage): Promise<void> {
       coalescedCount: burst.coalescedCount,
       coalescedMessageIds: burst.messageIds,
       rootId: burst.rootId,
+      chatType: burst.chatType,
     });
 
     if (result.deliveryStatus === 'sent') {
@@ -220,6 +221,7 @@ async function handleMessage(msg: LarkMessage, _appId: string): Promise<void> {
     mentions: msg.mentions,
     mentionedBot: isMentionedBot(msg.mentions, msg.text),
     rootId: msg.rootId,
+    chatType: msg.chatType,
   });
 }
 

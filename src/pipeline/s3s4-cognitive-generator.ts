@@ -1,7 +1,9 @@
 import type { PipelineContext, PipelineStage, CognitiveDecision } from './types.js';
 import type { MemoryManager } from '../memory/memory-manager.js';
+import type { LLMMessage, ToolDef, LLMRawInputItem } from '../llm/llm-client.js';
 import { callLLM } from '../llm/llm-client.js';
 import { buildMessages, type PromptContext } from '../llm/prompt-builder.js';
+import { executeTool, TOOL_DEFINITIONS } from '../tools/tool-executor.js';
 import { logger } from '../utils/logger.js';
 
 // Degradation templates by context
@@ -57,8 +59,34 @@ export class S3S4CognitiveGenerator implements PipelineStage {
 
     const messages = buildMessages(promptCtx);
 
+    const tools: ToolDef[] = TOOL_DEFINITIONS as ToolDef[];
+
     try {
-      const result = await callLLM(messages);
+      // Tool-use loop: up to 3 rounds
+      // rawItems accumulates function_call echoes + function_call_output for Responses API
+      const rawItems: LLMRawInputItem[] = [];
+      let result = await callLLM(messages, tools);
+      let rounds = 0;
+
+      while (result.toolCalls.length > 0 && rounds < 3) {
+        rounds++;
+
+        // Echo back the raw output items (includes function_call blocks)
+        rawItems.push(...result.rawOutput);
+
+        for (const tc of result.toolCalls) {
+          logger.info(`S3S4: tool_call round=${rounds} name=${tc.name}`, { args: tc.arguments });
+          const toolResult = await executeTool(tc.name, tc.arguments);
+
+          // Append function_call_output per Responses API spec
+          rawItems.push({
+            type: 'function_call_output',
+            call_id: tc.callId,
+            output: toolResult,
+          });
+        }
+        result = await callLLM(messages, tools, rawItems);
+      }
 
       // Handle [SKIP] — LLM decided not to reply (e.g. @mention to someone else)
       if (result.text.trim() === '[SKIP]') {
@@ -71,7 +99,7 @@ export class S3S4CognitiveGenerator implements PipelineStage {
 
       ctx.generatedResponse = result.text;
       ctx.selectedModel = result.model;
-      logger.info(`S3S4: generated (model=${result.model}, len=${result.text.length})`);
+      logger.info(`S3S4: generated (model=${result.model}, len=${result.text.length}${rounds > 0 ? `, tool_rounds=${rounds}` : ''})`);
     } catch (err) {
       logger.error('S3S4: LLM call failed, entering degradation', { error: String(err) });
 

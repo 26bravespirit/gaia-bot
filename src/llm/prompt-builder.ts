@@ -203,6 +203,13 @@ export function buildMessages(ctx: PromptContext): LLMMessage[] {
     systemPrompt += '\n' + antiAiBlock.join('\n');
   }
 
+  // ── Tool usage instructions (injected when tools are available) ──
+  systemPrompt += `\n\n[工具能力]
+你有搜索互联网和读取网页的能力，但只在以下情况使用：
+- 用户明确要求搜索（如"帮我搜一下"、"查查"、"搜索"）
+- 用户给了一个 URL 并要求你读取内容
+如果用户只是在普通聊天，绝对不要调用工具。`;
+
   const messages: LLMMessage[] = [{ role: 'system', content: systemPrompt }];
 
   // Add history

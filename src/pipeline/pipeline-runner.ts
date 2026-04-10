@@ -22,6 +22,7 @@ export class PipelineRunner {
     coalescedCount?: number;
     coalescedMessageIds?: string[];
     rootId?: string | null;
+    chatType?: string;
   }): Promise<PipelineContext> {
     const ctx: PipelineContext = {
       rawMessageId: input.messageId,
@@ -37,6 +38,7 @@ export class PipelineRunner {
       coalescedCount: input.coalescedCount,
       coalescedMessageIds: input.coalescedMessageIds,
       rawRootId: input.rootId ?? null,
+      rawChatType: input.chatType ?? 'group',
       config: {} as PersonaConfig,
       userProfile: null,
       history: [],

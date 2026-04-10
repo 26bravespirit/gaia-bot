@@ -13,6 +13,8 @@ export interface CoalescedMessage {
   messageIds: string[];
   /** Root thread message ID — non-null when the burst started inside a thread */
   rootId: string | null;
+  /** Chat type: 'p2p' or 'group' */
+  chatType: string;
 }
 
 interface BurstMessage {
@@ -31,6 +33,7 @@ interface PendingBurst {
   firstTs: number;
   timer: ReturnType<typeof setTimeout>;
   rootId: string | null;
+  chatType: string;
 }
 
 export interface CoalescerConfig {
@@ -69,6 +72,7 @@ export class MessageCoalescer {
     mentions: Array<Record<string, unknown>>;
     mentionedBot: boolean;
     rootId: string | null;
+    chatType: string;
   }): void {
     const cfg = this.getConfig();
     const key = `${msg.chatId}:${msg.senderId}`;
@@ -101,6 +105,7 @@ export class MessageCoalescer {
           coalescedCount: 1,
           messageIds: [msg.messageId],
           rootId: msg.rootId,
+          chatType: msg.chatType,
         });
       }
       return;
@@ -148,6 +153,7 @@ export class MessageCoalescer {
         }],
         firstTs: Date.now(),
         rootId: msg.rootId,
+        chatType: msg.chatType,
         timer: setTimeout(() => {
           this.pending.delete(key);
           this.fireBurst(burst);
@@ -193,6 +199,7 @@ export class MessageCoalescer {
       coalescedCount: msgs.length,
       messageIds: msgs.map(m => m.messageId),
       rootId: burst.rootId,
+      chatType: burst.chatType,
     });
   }
 
