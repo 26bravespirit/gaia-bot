@@ -6,13 +6,14 @@
 
 ## 特性
 
-- 🧠 8 阶段处理管道 — 从消息接收到拟人化回复
+- 🧠 8 阶段处理管道 — 从消息接收到拟人化回复（含消息合并、引用拉取、Thread 回复）
 - 💾 多层记忆系统 — 即时/工作/长期/传记/关系五层记忆
 - 😊 动态情绪 — 心情随时间和对话变化，影响回复风格
 - 🛡️ 反 AI 检测 — 8 维指纹分析 + 6 条行为规则，不像 AI
+- 🔍 搜索与网页读取 — Tavily API 搜索 + URL 内容提取，LLM tool_use 驱动
 - 🔧 热配置 — persona.yaml 修改即生效，无需重启
-- 📊 Web 控制面板 — localhost:3456 可视化管理
-- 🔄 双通道支持 — 飞书 + Lark 同时运行互不干扰
+- 📊 Control Center — localhost:3400 PM2 管理 + 主动发言开关 + 定时关闭
+- 🔄 PM2 进程管理 — 自动重启 + macOS launchd 开机自启
 
 ## 快速开始
 
@@ -55,7 +56,8 @@ pnpm build && pnpm start
     │
     ▼
 ┌─ S3+S4 认知生成 ───────────────────────────┐
-│  LLM 回复生成 + 人类行为概率注入              │
+│  LLM 回复生成 + Tool Loop (≤3轮)            │
+│  web_search / read_url + 人类行为概率注入     │
 │  降级模板兜底                                │
 └────────────────────────────────────────────┘
     │
@@ -74,7 +76,7 @@ pnpm build && pnpm start
     │
     ▼
 ┌─ S6 出站调度 ──────────────────────────────┐
-│  多段落拆分为多条消息 → 打字延迟 → 发送       │
+│  段落拆分 → 打字延迟 → Thread/主聊天发送      │
 └────────────────────────────────────────────┘
 ```
 
@@ -83,15 +85,16 @@ pnpm build && pnpm start
 ```
 gaia-bot/
 ├── src/
-│   ├── pipeline/     # 8 个管道阶段 + 调度器
+│   ├── pipeline/     # 8 个管道阶段 + 提取调度器
 │   ├── memory/       # 5 层记忆系统
-│   ├── engine/       # 时间引擎、身份守卫、事件总线
-│   ├── llm/          # LLM 客户端 + Prompt 构建器
+│   ├── engine/       # 时间引擎、身份守卫、事件总线、消息合并器
+│   ├── llm/          # LLM 客户端 (tool_use) + Prompt 构建器
+│   ├── tools/        # 搜索 (Tavily) + 网页读取 (html-to-text)
 │   ├── lark/         # 飞书通道管理
 │   ├── config/       # 配置 Schema + YAML 加载
 │   └── utils/        # 日志、环境、PID 锁
-├── tests/            # 171 个测试
-├── scripts/          # CLI 工具
+├── tests/            # 292 个测试
+├── scripts/          # Control Center + CLI 工具
 ├── persona.yaml      # 人格定义（可热加载）
 ├── .env.example      # 环境变量模板
 └── SKILL.md          # 交互式初始化向导
@@ -117,20 +120,24 @@ gaia-bot/
 ## 工具脚本
 
 ```bash
+# PM2 进程管理
+pm2 start ecosystem.config.cjs   # 启动
+pm2 stop/restart gaia-bot         # 停止/重启
+
+# Control Center (PM2 管理 + 主动发言 + 定时关闭)
+pm2 start scripts/launcher.cjs --name control-center  # → http://localhost:3400
+
 # 查看记忆系统
 node scripts/inspect-memory.cjs all|ltm|rel|bio|self|conv
 
 # 通道控制
 node scripts/gaia-ctl.cjs status|on|off|routing
-
-# Web 控制面板
-node scripts/gaia-dashboard.cjs  # → http://localhost:3456
 ```
 
 ## 测试
 
 ```bash
-pnpm test           # 运行全部 171 个测试
+pnpm test           # 运行全部 292 个测试
 pnpm test:watch     # 监听模式
 pnpm typecheck      # 类型检查
 ```
