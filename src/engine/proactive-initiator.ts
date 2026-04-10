@@ -69,6 +69,10 @@ export class ProactiveInitiator {
   }
 
   check(): ProactiveMessage | null {
+    // Runtime kill switch — settable via Control Center or DB
+    const enabled = this.memory.working.getRuntimeConfig('proactive_enabled');
+    if (enabled === 'false') return null;
+
     const config = this.getConfig();
     const proactive = config.temporal?.proactive_behavior;
     if (!proactive) return null;

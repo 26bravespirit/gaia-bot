@@ -382,115 +382,126 @@ function getPage() {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Gaia Control Center</title>
 <style>
+/* ── Picasso Palette ──
+   Blue Period: deep cerulean, slate blue
+   Rose Period: terracotta, warm sand
+   Cubist: ochre, olive, charcoal geometry
+   Canvas: warm linen ground
+*/
+:root{
+  --canvas:#e8dfd4;--card:#f5f1eb;--border:#d4cabb;--border-light:#e4ddd2;
+  --ink:#1e1e1e;--ink-sub:#5c5550;--ink-muted:#9b918a;
+  --blue:#2d5f8a;--rose:#c06b4e;--ochre:#c49a3f;--olive:#6a7d5a;--slate:#5e6e82;--terra:#a14b35;
+  --mono:'SF Mono','Menlo',monospace;
+}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro',sans-serif;background:#09090b;color:#e4e4e7;min-height:100vh;padding:24px}
+body{font-family:'Georgia','Hiragino Mincho ProN','Noto Serif SC',serif;color:var(--ink);min-height:100vh;padding:32px;background:var(--canvas);background-image:url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence baseFrequency='0.8' numOctaves='4' type='fractalNoise' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23g)' opacity='0.04'/%3E%3C/svg%3E")}
 .container{max-width:1100px;margin:0 auto}
-h1{font-size:24px;font-weight:600;color:#fff;margin-bottom:4px}
-.sub{color:#52525b;font-size:13px;margin-bottom:24px}
-.sub .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;margin-right:6px;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+h1{font-size:18px;font-weight:400;color:var(--ink);margin-bottom:4px;letter-spacing:1px;font-style:italic}
+.sub{color:var(--ink-muted);font-size:11px;margin-bottom:32px;font-family:-apple-system,sans-serif}
+.sub .dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--olive);margin-right:6px}
 
 /* Bot cards */
-.bots{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:24px}
-.bot-card{background:#18181b;border:1px solid #27272a;border-radius:12px;padding:20px}
-.bot-card h2{font-size:16px;font-weight:500;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.badge{padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600}
-.badge.on{background:rgba(34,197,94,.15);color:#22c55e}
-.badge.off{background:rgba(239,68,68,.15);color:#ef4444}
-.row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px;border-bottom:1px solid #1f1f23}
+.bots{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:32px}
+.bot-card{background:var(--card);border:1px solid var(--border);border-radius:4px;padding:24px}
+.bot-card h2{font-size:14px;font-weight:400;margin-bottom:16px;display:flex;align-items:center;gap:10px;color:var(--ink);font-family:-apple-system,sans-serif}
+.badge{padding:2px 8px;border-radius:2px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;font-family:-apple-system,sans-serif}
+.badge.on{background:rgba(106,125,90,.12);color:var(--olive);border:1px solid var(--olive)}
+.badge.off{background:rgba(161,75,53,.08);color:var(--terra);border:1px solid var(--terra)}
+.row{display:flex;justify-content:space-between;padding:6px 0;font-size:12px;border-bottom:1px solid var(--border-light);font-family:-apple-system,sans-serif}
 .row:last-child{border:none}
-.row .k{color:#71717a}
-.row .v{font-family:'SF Mono',monospace;font-size:12px}
+.row .k{color:var(--ink-muted)}
+.row .v{font-family:var(--mono);font-size:11px;color:var(--ink)}
 
 /* Tabs */
-.tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid #27272a;padding-bottom:8px}
-.tab{padding:6px 16px;border-radius:8px;font-size:13px;cursor:pointer;color:#71717a;background:transparent;border:none;transition:all .2s}
-.tab:hover{color:#a1a1aa}
-.tab.active{background:#27272a;color:#fff}
+.tabs{display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid var(--ink);padding-bottom:0}
+.tab{padding:8px 20px;font-size:12px;cursor:pointer;color:var(--ink-muted);background:transparent;border:none;border-bottom:2px solid transparent;transition:all .2s;margin-bottom:-2px;font-family:-apple-system,sans-serif;letter-spacing:.3px}
+.tab:hover{color:var(--ink-sub)}
+.tab.active{color:var(--ink);border-bottom-color:var(--blue)}
 .tab-select{display:flex;gap:4px;margin-bottom:12px}
-.tab-select button{padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;color:#71717a;background:transparent;border:1px solid #27272a}
-.tab-select button.active{background:#27272a;color:#fff}
+.tab-select button{padding:4px 12px;border-radius:2px;font-size:11px;cursor:pointer;color:var(--ink-sub);background:transparent;border:1px solid var(--border);font-family:-apple-system,sans-serif}
+.tab-select button.active{background:var(--border-light);color:var(--ink)}
 
 /* Panels */
-.panel{display:none;background:#18181b;border:1px solid #27272a;border-radius:12px;padding:20px;margin-bottom:16px}
+.panel{display:none;background:var(--card);border:1px solid var(--border);border-radius:4px;padding:24px;margin-bottom:20px}
 .panel.active{display:block}
 
 /* Memory cards */
 .mem-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:16px}
-.mem-card{background:#1f1f23;border-radius:8px;padding:12px;text-align:center}
-.mem-card .num{font-size:24px;font-weight:700;font-family:'SF Mono',monospace}
-.mem-card .lbl{color:#71717a;font-size:11px;margin-top:2px}
-.green .num{color:#22c55e}.blue .num{color:#3b82f6}.purple .num{color:#a855f7}.yellow .num{color:#eab308}.red .num{color:#ef4444}
+.mem-card{background:var(--canvas);border:1px solid var(--border);border-radius:4px;padding:12px;text-align:center}
+.mem-card .num{font-size:20px;font-weight:400;font-family:var(--mono)}
+.mem-card .lbl{color:var(--ink-muted);font-size:10px;margin-top:4px;letter-spacing:.3px;font-family:-apple-system,sans-serif}
+.green .num{color:var(--olive)}.blue .num{color:var(--blue)}.purple .num{color:var(--slate)}.yellow .num{color:var(--ochre)}.red .num{color:var(--terra)}
 
 /* Users table */
-table{width:100%;font-size:13px;border-collapse:collapse}
-th{text-align:left;color:#71717a;font-weight:500;padding:6px 8px;border-bottom:1px solid #27272a}
-td{padding:6px 8px;border-bottom:1px solid #1f1f23}
+table{width:100%;font-size:12px;border-collapse:collapse;font-family:-apple-system,sans-serif}
+th{text-align:left;color:var(--ink-muted);font-weight:400;padding:8px;border-bottom:2px solid var(--ink);font-size:10px;letter-spacing:.5px;text-transform:uppercase}
+td{padding:8px;border-bottom:1px solid var(--border-light);color:var(--ink)}
 
-/* Waterfall */
-.wf-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid #1f1f23}
-.wf-sender{width:80px;color:#71717a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wf-bars{flex:1;display:flex;height:18px;border-radius:4px;overflow:hidden}
-.wf-bar{height:100%;min-width:2px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;overflow:hidden}
-.wf-total{width:50px;text-align:right;font-family:'SF Mono',monospace;color:#a1a1aa}
-.wf-bar.s1{background:#3b82f6}.wf-bar.s2{background:#8b5cf6}.wf-bar.s3s4{background:#f59e0b}.wf-bar.s5{background:#22c55e}.wf-bar.s55{background:#06b6d4}.wf-bar.s6{background:#ef4444}
-.wf-legend{display:flex;gap:12px;font-size:11px;color:#71717a;margin-bottom:8px}
+/* Waterfall — Picasso palette */
+.wf-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px;border-bottom:1px solid var(--border-light);font-family:-apple-system,sans-serif}
+.wf-sender{width:80px;color:var(--ink-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-bars{flex:1;display:flex;height:16px;border-radius:2px;overflow:hidden}
+.wf-bar{height:100%;min-width:2px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff;overflow:hidden}
+.wf-total{width:50px;text-align:right;font-family:var(--mono);font-size:10px;color:var(--ink-muted)}
+.wf-bar.s1{background:var(--blue)}.wf-bar.s2{background:var(--slate)}.wf-bar.s3s4{background:var(--ochre)}.wf-bar.s5{background:var(--olive)}.wf-bar.s55{background:var(--rose)}.wf-bar.s6{background:var(--terra)}
+.wf-legend{display:flex;gap:16px;font-size:10px;color:var(--ink-muted);margin-bottom:10px;letter-spacing:.2px;font-family:-apple-system,sans-serif}
 .wf-legend span{display:flex;align-items:center;gap:4px}
-.wf-legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.wf-legend i{width:8px;height:8px;border-radius:1px;display:inline-block}
 
 /* Logs */
-.log-box{background:#0a0a0a;border-radius:8px;padding:12px;max-height:360px;overflow-y:auto;font-family:'SF Mono',monospace;font-size:12px;line-height:1.7}
+.log-box{background:var(--canvas);border:1px solid var(--border);border-radius:4px;padding:16px;max-height:360px;overflow-y:auto;font-family:var(--mono);font-size:11px;line-height:1.8;color:var(--ink)}
 .log-line{white-space:pre-wrap;word-break:break-all}
-.log-line .ts{color:#52525b}.log-line .info{color:#3b82f6}.log-line .warn{color:#eab308}.log-line .error{color:#ef4444}
-.log-filters{display:flex;gap:4px;margin-bottom:8px}
-.log-filters label{font-size:11px;color:#71717a;display:flex;align-items:center;gap:4px;cursor:pointer}
-.log-filters input{accent-color:#3b82f6}
+.log-line .ts{color:var(--ink-muted)}.log-line .info{color:var(--blue)}.log-line .warn{color:var(--ochre)}.log-line .error{color:var(--terra)}
+.log-filters{display:flex;gap:8px;margin-bottom:10px;font-family:-apple-system,sans-serif}
+.log-filters label{font-size:10px;color:var(--ink-sub);display:flex;align-items:center;gap:4px;cursor:pointer}
+.log-filters input{accent-color:var(--blue)}
 
 /* Errors */
-.err-row{padding:8px;background:#1c1917;border-radius:6px;margin-bottom:6px;font-size:12px;font-family:'SF Mono',monospace;color:#fca5a5}
+.err-row{padding:10px;background:rgba(161,75,53,.06);border:1px solid rgba(161,75,53,.2);border-radius:2px;margin-bottom:8px;font-size:11px;font-family:var(--mono);color:var(--terra)}
 
-.footer{text-align:center;color:#27272a;font-size:11px;margin-top:32px}
+.footer{text-align:center;color:var(--border);font-size:10px;margin-top:40px;letter-spacing:1px;font-family:-apple-system,sans-serif}
 
 /* Control buttons */
-.ctrl-row{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
-.ctrl-btn{display:flex;align-items:center;gap:5px;padding:6px 14px;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;font-family:inherit}
-.ctrl-btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
-.ctrl-btn:not(:disabled):hover{filter:brightness(1.15);transform:translateY(-1px)}
-.ctrl-btn:not(:disabled):active{transform:translateY(0)}
-.ctrl-btn.start{background:rgba(34,197,94,.15);color:#22c55e}
-.ctrl-btn.stop{background:rgba(239,68,68,.15);color:#ef4444}
-.ctrl-btn.restart{background:rgba(59,130,246,.15);color:#3b82f6}
-.ctrl-btn.loading{opacity:.6;cursor:wait}
+.ctrl-row{display:flex;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap}
+.ctrl-btn{display:flex;align-items:center;gap:5px;padding:6px 16px;border:1px solid var(--border);border-radius:3px;font-size:11px;font-weight:400;cursor:pointer;transition:all .15s;font-family:-apple-system,sans-serif;background:transparent;color:var(--ink)}
+.ctrl-btn:disabled{opacity:.25;cursor:not-allowed}
+.ctrl-btn:not(:disabled):hover{background:var(--border-light)}
+.ctrl-btn:not(:disabled):active{background:var(--border)}
+.ctrl-btn.start{color:var(--olive);border-color:var(--olive)}
+.ctrl-btn.stop{color:var(--terra);border-color:var(--terra)}
+.ctrl-btn.restart{color:var(--blue);border-color:var(--blue)}
+.ctrl-btn.loading{opacity:.5;cursor:wait}
 
 /* Advanced panel */
-.adv-toggle{display:flex;align-items:center;gap:6px;margin-top:12px;color:#52525b;font-size:12px;cursor:pointer;user-select:none;background:none;border:none;font-family:inherit;padding:0}
-.adv-toggle:hover{color:#71717a}
-.adv-panel{display:none;margin-top:12px;border-top:1px solid #27272a;padding-top:12px}
+.adv-toggle{display:flex;align-items:center;gap:6px;margin-top:14px;color:var(--ink-muted);font-size:11px;cursor:pointer;user-select:none;background:none;border:none;font-family:-apple-system,sans-serif;padding:0;letter-spacing:.2px}
+.adv-toggle:hover{color:var(--ink-sub)}
+.adv-panel{display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px}
 .adv-panel.open{display:block}
 
 /* Toggle switch */
-.sw-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1f1f23}
+.sw-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-light);font-family:-apple-system,sans-serif}
 .sw-row:last-child{border:none}
-.sw-label{font-size:13px;color:#a1a1aa}
-.sw-sub{font-size:11px;color:#52525b;margin-top:2px}
+.sw-label{font-size:12px;color:var(--ink)}
+.sw-sub{font-size:10px;color:var(--ink-muted);margin-top:3px}
 .switch{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0}
 .switch input{opacity:0;width:0;height:0}
-.slider{position:absolute;inset:0;background:#27272a;border-radius:20px;transition:.2s;cursor:pointer}
-.slider:before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;background:#71717a;border-radius:50%;transition:.2s}
-input:checked+.slider{background:rgba(34,197,94,.3)}
-input:checked+.slider:before{background:#22c55e;transform:translateX(16px)}
+.slider{position:absolute;inset:0;background:var(--border);border-radius:20px;transition:.2s;cursor:pointer}
+.slider:before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+input:checked+.slider{background:var(--blue)}
+input:checked+.slider:before{background:#fff;transform:translateX(16px)}
 
 /* Schedule */
-.sched-options{display:flex;flex-direction:column;gap:8px;margin-top:8px}
-.sched-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:#a1a1aa;cursor:pointer}
-.sched-opt input[type=radio]{accent-color:#3b82f6}
-.sched-input{background:#1f1f23;border:1px solid #27272a;border-radius:6px;color:#e4e4e7;padding:3px 8px;font-size:12px;font-family:'SF Mono',monospace;width:90px}
-.sched-input:focus{outline:none;border-color:#3b82f6}
-.sched-save{margin-top:10px;padding:5px 16px;background:rgba(59,130,246,.15);color:#3b82f6;border:none;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s}
-.sched-save:hover{filter:brightness(1.2)}
+.sched-options{display:flex;flex-direction:column;gap:8px;margin-top:10px;font-family:-apple-system,sans-serif}
+.sched-opt{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink);cursor:pointer}
+.sched-opt input[type=radio]{accent-color:var(--blue)}
+.sched-input{background:var(--canvas);border:1px solid var(--border);border-radius:3px;color:var(--ink);padding:4px 8px;font-size:11px;font-family:var(--mono);width:90px}
+.sched-input:focus{outline:none;border-color:var(--blue)}
+.sched-save{margin-top:12px;padding:6px 20px;background:var(--blue);color:#fff;border:none;border-radius:3px;font-size:11px;font-weight:500;cursor:pointer;font-family:-apple-system,sans-serif;transition:opacity .15s;letter-spacing:.3px}
+.sched-save:hover{opacity:.85}
 
 /* Toast */
-.toast{position:fixed;bottom:24px;right:24px;background:#27272a;border:1px solid #3f3f46;color:#e4e4e7;padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;z-index:999}
+.toast{position:fixed;bottom:32px;right:32px;background:var(--ink);color:var(--canvas);padding:12px 20px;border-radius:4px;font-size:12px;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;z-index:999;font-family:-apple-system,sans-serif}
 .toast.show{opacity:1;transform:translateY(0)}
 </style>
 </head>
@@ -513,12 +524,12 @@ input:checked+.slider:before{background:#22c55e;transform:translateX(16px)}
 
 <div class="panel active" id="panel-pipeline">
   <div class="wf-legend">
-    <span><i style="background:#3b82f6"></i>S1</span>
-    <span><i style="background:#8b5cf6"></i>S2</span>
-    <span><i style="background:#f59e0b"></i>S3S4</span>
-    <span><i style="background:#22c55e"></i>S5</span>
-    <span><i style="background:#06b6d4"></i>S5.5</span>
-    <span><i style="background:#ef4444"></i>S6</span>
+    <span><i style="background:#2d5f8a"></i>S1</span>
+    <span><i style="background:#5e6e82"></i>S2</span>
+    <span><i style="background:#c49a3f"></i>S3S4</span>
+    <span><i style="background:#6a7d5a"></i>S5</span>
+    <span><i style="background:#c06b4e"></i>S5.5</span>
+    <span><i style="background:#a14b35"></i>S6</span>
   </div>
   <div id="waterfall"></div>
 </div>
@@ -636,6 +647,24 @@ async function botAction(botName, action, btn) {
 }
 
 // ── Autostart ──────────────────────────────────────────────────────────
+async function toggleProactive(botName, cb) {
+  const enable = cb.checked;
+  cb.disabled = true;
+  try {
+    const r = await fetch('/api/proactive/'+botName, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:enable}) });
+    const d = await r.json();
+    if (d.ok) {
+      toast('主动发言 '+(enable?'已开启':'已关闭'));
+    } else {
+      toast(d.error || 'failed', true);
+      cb.checked = !enable;
+    }
+  } catch(e) {
+    toast(String(e), true);
+    cb.checked = !enable;
+  } finally { cb.disabled = false; }
+}
+
 async function toggleAutostart(botName, cb) {
   const enable = cb.checked;
   cb.disabled = true;
@@ -721,6 +750,14 @@ async function renderBotCards(bots) {
     const isOpen = isAdvOpen(name);
     html += '<button class="adv-toggle" id="advbtn_'+dn+'" data-bot="'+dn+'" onclick="toggleAdv(this.dataset.bot)">'+(isOpen?'▴':'▾')+' 自动 & 定时</button>';
     html += '<div class="adv-panel'+(isOpen?' open':'')+'" id="adv_'+dn+'">';
+
+    // Proactive toggle (per-bot, runtime_config)
+    let proactiveOn = true;
+    try { proactiveOn = (await (await fetch('/api/proactive/'+name)).json()).enabled; } catch {}
+    html += '<div class="sw-row">';
+    html += '<div><div class="sw-label">主动发言</div><div class="sw-sub">Bot 会在沉默一段时间后主动找人聊天</div></div>';
+    html += '<label class="switch"><input type="checkbox" '+(proactiveOn?'checked':'')+' data-bot="'+dn+'" onchange="toggleProactive(this.dataset.bot,this)"><span class="slider"></span></label>';
+    html += '</div>';
 
     // Autostart row (shared — controls PM2 resurrect globally)
     html += '<div class="sw-row">';
@@ -911,6 +948,41 @@ const server = http.createServer(async (req, res) => {
       }
     });
     return;
+  }
+
+  // API: Proactive toggle (read/write runtime_config proactive_enabled)
+  const proactiveMatch = p.match(/^\/api\/proactive\/([^/]+)$/);
+  if (proactiveMatch) {
+    const botName = proactiveMatch[1];
+    const db = getScheduleDb(botName);
+    if (!db) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'db not found' }));
+    }
+    if (req.method === 'GET') {
+      try {
+        const row = db.prepare('SELECT value FROM runtime_config WHERE key = ?').get('proactive_enabled');
+        db.close();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: true, enabled: !row || row.value !== 'false' }));
+      } catch { db.close(); res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false })); }
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', () => {
+        try {
+          const { enabled } = JSON.parse(body);
+          db.prepare(`INSERT INTO runtime_config (key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
+            .run('proactive_enabled', enabled ? 'true' : 'false', Date.now());
+          db.close();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, enabled }));
+        } catch { db.close(); res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false })); }
+      });
+      return;
+    }
   }
 
   // API: Memory for a bot
