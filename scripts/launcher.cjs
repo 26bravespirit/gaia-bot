@@ -44,6 +44,37 @@ const BOT_CONFIGS = {
 let Database;
 try { Database = require('better-sqlite3'); } catch { Database = null; }
 
+// ── .env read/write helpers ──
+
+const ENV_PATH = path.resolve(__dirname, '../.env');
+
+function readEnvValue(key) {
+  try {
+    const content = fs.readFileSync(ENV_PATH, 'utf-8');
+    const match = content.match(new RegExp('^' + key + '=(.*)$', 'm'));
+    return match ? match[1].trim() : '';
+  } catch { return ''; }
+}
+
+function writeEnvValue(key, value) {
+  try {
+    let content = fs.readFileSync(ENV_PATH, 'utf-8');
+    const regex = new RegExp('^' + key + '=.*$', 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, key + '=' + value);
+    } else {
+      content += '\n' + key + '=' + value;
+    }
+    fs.writeFileSync(ENV_PATH, content, 'utf-8');
+    return true;
+  } catch { return false; }
+}
+
+function maskKey(key) {
+  if (!key || key.length < 8) return key ? '••••' : '';
+  return key.slice(0, 4) + '••••••' + key.slice(-3);
+}
+
 // ── Helpers ──
 
 function getPm2List() {
@@ -502,6 +533,15 @@ input:checked+.slider:before{background:#fff;transform:translateX(16px)}
 
 /* Toast */
 .toast{position:fixed;bottom:32px;right:32px;background:var(--ink);color:var(--canvas);padding:12px 20px;border-radius:4px;font-size:12px;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;z-index:999;font-family:-apple-system,sans-serif}
+/* OpenAI config */
+.oai-row{display:flex;align-items:center;gap:8px;font-family:-apple-system,sans-serif}
+.oai-label{font-size:12px;color:var(--ink-sub);width:52px;flex-shrink:0}
+.oai-input{flex:1;background:var(--canvas);border:1px solid var(--border);border-radius:3px;color:var(--ink);padding:5px 8px;font-size:11px;font-family:var(--mono)}
+.oai-input::placeholder{color:var(--ink-muted)}
+.oai-select{flex:1;background:var(--canvas);border:1px solid var(--border);border-radius:3px;color:var(--ink);padding:5px 8px;font-size:11px;font-family:var(--mono);cursor:pointer;appearance:auto}
+.oai-btn{background:transparent;border:1px solid var(--border);border-radius:3px;padding:4px 8px;cursor:pointer;font-size:12px;color:var(--ink-sub);transition:background .15s}
+.oai-btn:hover{background:var(--border-light)}
+
 .toast.show{opacity:1;transform:translateY(0)}
 </style>
 </head>
@@ -647,6 +687,90 @@ async function botAction(botName, action, btn) {
 }
 
 // ── Autostart ──────────────────────────────────────────────────────────
+async function saveApiKey() {
+  const inp = document.getElementById('openai_key_input');
+  const key = inp.value.trim();
+  if (!key) { toast('请输入 API Key', true); return; }
+  try {
+    const r = await fetch('/api/openai-key', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key}) });
+    const d = await r.json();
+    if (d.ok) {
+      toast('API Key 已保存，Bot 重启中');
+      inp.type = 'password';
+      inp.dataset.revealed = '0';
+      _modelsCache = null; loadModels(true);
+    } else { toast(d.error || 'failed', true); }
+  } catch(e) { toast(String(e), true); }
+}
+
+function toggleKeyVisibility() {
+  const inp = document.getElementById('openai_key_input');
+  const revealed = inp.dataset.revealed === '1';
+  inp.type = revealed ? 'password' : 'text';
+  inp.dataset.revealed = revealed ? '0' : '1';
+}
+
+let _modelsCache = null;
+async function loadModels(force) {
+  const selTool = document.getElementById('openai_model_select');
+  const selChat = document.getElementById('openai_chat_model_select');
+  // Use cache to avoid flicker on 5s refresh
+  if (!force && _modelsCache) {
+    if (selTool) selTool.innerHTML = _modelsCache.models.map(m => '<option value="'+m+'"'+(m===_modelsCache.current?' selected':'')+'>'+m+'</option>').join('');
+    if (selChat) selChat.innerHTML = _modelsCache.models.map(m => '<option value="'+m+'"'+(m===_modelsCache.currentChat?' selected':'')+'>'+m+'</option>').join('');
+    return;
+  }
+  try {
+    const d = await (await fetch('/api/openai-models')).json();
+    if (!d.ok) {
+      if (selTool) selTool.innerHTML = '<option>— 请先填写 API Key —</option>';
+      if (selChat) selChat.innerHTML = '<option>— 请先填写 API Key —</option>';
+      return;
+    }
+    _modelsCache = d;
+    if (selTool) selTool.innerHTML = d.models.map(m => '<option value="'+m+'"'+(m===d.current?' selected':'')+'>'+m+'</option>').join('');
+    if (selChat) selChat.innerHTML = d.models.map(m => '<option value="'+m+'"'+(m===d.currentChat?' selected':'')+'>'+m+'</option>').join('');
+  } catch {
+    if (selTool) selTool.innerHTML = '<option>— 加载失败 —</option>';
+    if (selChat) selChat.innerHTML = '<option>— 加载失败 —</option>';
+  }
+}
+
+async function switchModel(sel, type) {
+  const model = sel.value;
+  sel.disabled = true;
+  const label = type === 'chat' ? '聊天模型' : '工具模型';
+  try {
+    const r = await fetch('/api/openai-model', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model, type}) });
+    const d = await r.json();
+    if (d.ok) { toast(label+' 已切换为 '+model+'，Bot 重启中'); _modelsCache = null; loadModels(true); }
+    else { toast(d.error || 'failed', true); }
+  } catch(e) { toast(String(e), true); }
+  finally { sel.disabled = false; }
+}
+
+function pickPersonaFile(input) {
+  if (!input.files || !input.files[0]) return;
+  // File picker gives filename only; we need the full path.
+  // Browser security prevents reading full path — show the name and let user confirm/edit.
+  const name = input.files[0].name;
+  const inp = document.getElementById('persona_path_input');
+  if (inp) { inp.value = name; inp.focus(); }
+  toast('已选择 '+name+'，请确认路径后点击切换');
+}
+
+async function savePersona() {
+  const inp = document.getElementById('persona_path_input');
+  const p = inp.value.trim();
+  if (!p) { toast('请输入 persona 文件路径', true); return; }
+  try {
+    const r = await fetch('/api/persona', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:p}) });
+    const d = await r.json();
+    if (d.ok) { toast('Persona 已切换为 '+p+'，Bot 重启中'); }
+    else { toast(d.error || 'failed', true); }
+  } catch(e) { toast(String(e), true); }
+}
+
 async function toggleProactive(botName, cb) {
   const enable = cb.checked;
   cb.disabled = true;
@@ -777,10 +901,50 @@ async function renderBotCards(bots) {
     html += '</div>';
     html += '<button class="sched-save" data-bot="'+dn+'" onclick="saveSchedule(this.dataset.bot)">保存定时</button>';
 
+    // OpenAI config section
+    let maskedKey = '';
+    try { maskedKey = (await (await fetch('/api/openai-key')).json()).masked || ''; } catch {}
+    html += '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">';
+    html += '<div style="font-size:12px;color:var(--ink-sub);margin-bottom:8px">OpenAI 配置</div>';
+    // API Key row
+    html += '<div class="oai-row">';
+    html += '<span class="oai-label">API Key</span>';
+    html += '<input id="openai_key_input" class="oai-input" type="password" data-revealed="0" placeholder="'+escHtml(maskedKey || 'sk-proj-...')+'">';
+    html += '<button class="oai-btn" onclick="toggleKeyVisibility()" title="显示/隐藏">👁</button>';
+    html += '<button class="sched-save" onclick="saveApiKey()">保存</button>';
+    html += '</div>';
+    // Chat model row
+    html += '<div class="oai-row" style="margin-top:8px">';
+    html += '<span class="oai-label">聊天模型</span>';
+    html += '<select id="openai_chat_model_select" class="oai-select" onchange="switchModel(this,\'chat\')"><option>加载中...</option></select>';
+    html += '</div>';
+    // Tool model row
+    html += '<div class="oai-row" style="margin-top:8px">';
+    html += '<span class="oai-label">工具模型</span>';
+    html += '<select id="openai_model_select" class="oai-select" onchange="switchModel(this,\'tool\')"><option>加载中...</option></select>';
+    html += '<button class="oai-btn" onclick="_modelsCache=null;loadModels(true)" title="刷新">↺</button>';
+    html += '</div>';
+    html += '</div>';
+
+    // Bot params section
+    let personaPath = '';
+    try { personaPath = (await (await fetch('/api/persona')).json()).path || ''; } catch {}
+    html += '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">';
+    html += '<div style="font-size:12px;color:var(--ink-sub);margin-bottom:8px">Bot 参数</div>';
+    html += '<div class="oai-row">';
+    html += '<span class="oai-label">Persona</span>';
+    html += '<input id="persona_path_input" class="oai-input" type="text" value="'+escHtml(personaPath)+'" placeholder="./persona.yaml">';
+    html += '<button class="oai-btn" data-target="persona_file_picker" onclick="document.getElementById(this.dataset.target).click()" title="选择文件">📂</button>';
+    html += '<input type="file" id="persona_file_picker" accept=".yaml,.yml" style="display:none" onchange="pickPersonaFile(this)">';
+    html += '<button class="sched-save" onclick="savePersona()">切换</button>';
+    html += '</div>';
+    html += '</div>';
+
     html += '</div>'; // adv-panel
     html += '</div>'; // bot-card
   }
   document.getElementById('bots').innerHTML = html;
+  loadModels(false);
 }
 
 // ── Main refresh ───────────────────────────────────────────────────────
@@ -983,6 +1147,97 @@ const server = http.createServer(async (req, res) => {
       });
       return;
     }
+  }
+
+  // API: OpenAI Key — read (masked)
+  if (p === '/api/openai-key' && req.method === 'GET') {
+    const key = readEnvValue('OPENAI_API_KEY');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true, configured: !!key, masked: maskKey(key) }));
+  }
+  // API: OpenAI Key — write
+  if (p === '/api/openai-key' && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { key } = JSON.parse(body);
+        if (!key) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'missing key' })); }
+        writeEnvValue('OPENAI_API_KEY', key);
+        try { execSync(PM2_BIN + ' restart gaia-bot --update-env', { timeout: 10000 }); } catch {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false })); }
+    });
+    return;
+  }
+
+  // API: OpenAI Models — list available
+  if (p === '/api/openai-models' && req.method === 'GET') {
+    const apiKey = readEnvValue('OPENAI_API_KEY');
+    const currentModel = readEnvValue('OPENAI_MODEL');
+    if (!apiKey) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'no api key' }));
+    }
+    (async () => {
+      try {
+        const r = await fetch('https://api.openai.com/v1/models', { headers: { 'Authorization': 'Bearer ' + apiKey }, signal: AbortSignal.timeout(10000) });
+        const data = await r.json();
+        const models = (data.data || []).map(m => m.id).sort();
+        const currentChatModel = readEnvValue('OPENAI_CHAT_MODEL') || 'gpt-5-mini';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, models, current: currentModel, currentChat: currentChatModel }));
+      } catch (e) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      }
+    })();
+    return;
+  }
+
+  // API: OpenAI Model — switch
+  if (p === '/api/openai-model' && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { model, type } = JSON.parse(body);
+        if (!model) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'missing model' })); }
+        const envKey = type === 'chat' ? 'OPENAI_CHAT_MODEL' : 'OPENAI_MODEL';
+        writeEnvValue(envKey, model);
+        try { execSync(PM2_BIN + ' restart gaia-bot --update-env', { timeout: 10000 }); } catch {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false })); }
+    });
+    return;
+  }
+
+  // API: Persona config — read current
+  if (p === '/api/persona' && req.method === 'GET') {
+    const current = readEnvValue('PERSONA_CONFIG') || './persona.yaml';
+    const abs = path.resolve(__dirname, '..', current);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true, path: current, absolutePath: abs, exists: fs.existsSync(abs) }));
+  }
+  // API: Persona config — switch
+  if (p === '/api/persona' && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { path: newPath } = JSON.parse(body);
+        if (!newPath) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'missing path' })); }
+        const abs = path.isAbsolute(newPath) ? newPath : path.resolve(__dirname, '..', newPath);
+        if (!fs.existsSync(abs)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: '文件不存在: ' + abs })); }
+        writeEnvValue('PERSONA_CONFIG', newPath);
+        try { execSync(PM2_BIN + ' restart gaia-bot --update-env', { timeout: 10000 }); } catch {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, path: newPath }));
+      } catch { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false })); }
+    });
+    return;
   }
 
   // API: Memory for a bot

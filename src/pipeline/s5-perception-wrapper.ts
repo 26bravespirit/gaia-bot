@@ -156,9 +156,9 @@ export class S5PerceptionWrapper implements PipelineStage {
     }
 
     // R04: Length Safety Net — only truncate extreme outliers
-    // Normal length control is done probabilistically in prompt-builder
+    // Skip for tool-assisted replies (calendar, search results need full output)
     const targetLen = ctx.config.language.base_style.avg_message_length;
-    if (result.length > targetLen * 3) {
+    if (!ctx.toolUsedInGeneration && result.length > targetLen * 3) {
       const originalText = result;
       // Truncate at a natural break point
       const sentences = result.split(/(?<=[。！？!?\n])/);

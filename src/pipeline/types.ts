@@ -99,6 +99,9 @@ export interface PipelineContext {
   antiAiScore?: number;
   antiAiVerdict?: AntiAiVerdict;
 
+  // Tool usage
+  toolUsedInGeneration?: boolean;
+
   // Degradation
   isDegraded?: boolean;
   degradationReason?: string;

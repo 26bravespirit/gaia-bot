@@ -116,11 +116,11 @@ function extractOutput(parsed: Record<string, unknown>): ParsedOutput {
   return { text, toolCalls, rawOutput };
 }
 
-export async function callLLM(messages: LLMMessage[], tools?: ToolDef[], rawItems?: LLMRawInputItem[]): Promise<LLMResponse> {
+export async function callLLM(messages: LLMMessage[], tools?: ToolDef[], rawItems?: LLMRawInputItem[], timeoutMs = 60000, modelOverride?: string): Promise<LLMResponse> {
   const apiKey = resolveApiKey();
   if (!apiKey) throw new Error('OPENAI_API_KEY is required');
 
-  const models = parseModelCandidates();
+  const models = modelOverride ? [modelOverride] : parseModelCandidates();
   const apiUrl = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/responses';
 
   let lastError = '';
@@ -148,7 +148,7 @@ export async function callLLM(messages: LLMMessage[], tools?: ToolDef[], rawItem
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (!response.ok) {
@@ -162,6 +162,11 @@ export async function callLLM(messages: LLMMessage[], tools?: ToolDef[], rawItem
       }
 
       const parsed = await response.json() as Record<string, unknown>;
+      // Log token usage
+      const usage = parsed.usage as Record<string, number> | undefined;
+      if (usage) {
+        logger.info(`LLM usage: model=${model} input=${usage.input_tokens ?? 0} output=${usage.output_tokens ?? 0} total=${usage.total_tokens ?? 0}`);
+      }
       const output = extractOutput(parsed);
       return { text: output.text, model, modelIndex: i, toolCalls: output.toolCalls, rawOutput: output.rawOutput };
     } catch (err) {
@@ -170,7 +175,7 @@ export async function callLLM(messages: LLMMessage[], tools?: ToolDef[], rawItem
       // Distinguish timeout from other network errors
       const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
       lastError = isTimeout
-        ? `LLM timeout after 60s (model=${model})`
+        ? `LLM timeout after ${timeoutMs / 1000}s (model=${model})`
         : `LLM error (model=${model}): ${err}`;
 
       if (i < models.length - 1) {

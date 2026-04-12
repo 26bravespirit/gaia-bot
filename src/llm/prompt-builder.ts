@@ -23,6 +23,8 @@ export interface PromptContext {
   selfState?: SelfState;
   lengthDistribution?: { ultra_short: number; short: number; normal: number; long: number };
   lengthTemplates?: Record<string, string>;
+  /** Which tool groups are active for this request */
+  activeToolGroups?: { search?: boolean; calendar?: boolean };
 }
 
 /**
@@ -203,12 +205,19 @@ export function buildMessages(ctx: PromptContext): LLMMessage[] {
     systemPrompt += '\n' + antiAiBlock.join('\n');
   }
 
-  // ── Tool usage instructions (injected when tools are available) ──
-  systemPrompt += `\n\n[工具能力]
-你有搜索互联网和读取网页的能力，但只在以下情况使用：
-- 用户明确要求搜索（如"帮我搜一下"、"查查"、"搜索"）
-- 用户给了一个 URL 并要求你读取内容
-如果用户只是在普通聊天，绝对不要调用工具。`;
+  // ── Tool usage instructions (only injected when tools are active) ──
+  const tg = ctx.activeToolGroups;
+  if (tg?.search || tg?.calendar) {
+    const parts: string[] = ['[工具能力]'];
+    if (tg.search) {
+      parts.push('搜索工具：web_search(搜索互联网)、read_url(读取网页)。仅在用户明确要求搜索或给出URL时使用。');
+    }
+    if (tg.calendar) {
+      parts.push(`日历工具：calendar_agenda(查日程)、calendar_create_event(创建)、calendar_free_busy(查忙闲)、calendar_suggest_time(找空闲)、calendar_rsvp(回复邀请)、calendar_update_event(修改/删除)。
+规则：直接执行不需确认；删改需先用agenda查event_id；时间用ISO 8601 Asia/Shanghai；今天${new Date().toISOString().slice(0, 10)}。`);
+    }
+    systemPrompt += '\n\n' + parts.join('\n');
+  }
 
   const messages: LLMMessage[] = [{ role: 'system', content: systemPrompt }];
 

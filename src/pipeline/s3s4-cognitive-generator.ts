@@ -3,8 +3,12 @@ import type { MemoryManager } from '../memory/memory-manager.js';
 import type { LLMMessage, ToolDef, LLMRawInputItem } from '../llm/llm-client.js';
 import { callLLM } from '../llm/llm-client.js';
 import { buildMessages, type PromptContext } from '../llm/prompt-builder.js';
-import { executeTool, TOOL_DEFINITIONS } from '../tools/tool-executor.js';
+import { executeTool, SEARCH_TOOLS, CALENDAR_TOOLS } from '../tools/tool-executor.js';
 import { logger } from '../utils/logger.js';
+
+// Intent detection for tool routing
+const CALENDAR_KEYWORDS = /日程|会议|日历|安排|有空|忙不忙|约个|取消会|改时间|接受邀请|拒绝邀请|创建.*会|删除.*会|几点开会|加日历|加个日程|schedule|calendar|meeting|free|busy/i;
+const SEARCH_KEYWORDS = /搜一下|搜索|帮我查|查一下|帮我搜|看看这个|这个链接|这个网页|https?:\/\//i;
 
 // Degradation templates by context
 const DEGRADATION_TEMPLATES = {
@@ -39,6 +43,19 @@ export class S3S4CognitiveGenerator implements PipelineStage {
       ctx.humanBehaviorsTriggered = this.resolveHumanBehaviors(ctx);
     }
 
+    // Intent-based tool routing: only pass relevant tools to save tokens + prompt space
+    const text = ctx.rawText;
+    const needCalendar = CALENDAR_KEYWORDS.test(text);
+    const needSearch = SEARCH_KEYWORDS.test(text);
+    let tools: ToolDef[] | undefined;
+    if (needCalendar || needSearch) {
+      const selected: ToolDef[] = [];
+      if (needSearch) selected.push(...SEARCH_TOOLS as ToolDef[]);
+      if (needCalendar) selected.push(...CALENDAR_TOOLS as ToolDef[]);
+      tools = selected;
+      logger.debug(`S3S4: tool routing — calendar=${needCalendar} search=${needSearch} tools=${selected.length}`);
+    }
+
     const promptCtx: PromptContext = {
       config: ctx.config,
       timeState: ctx.timeState,
@@ -55,17 +72,19 @@ export class S3S4CognitiveGenerator implements PipelineStage {
       selfState: ctx.selfState,
       lengthDistribution: this.memory?.getLengthDistribution(),
       lengthTemplates: this.memory?.getLengthTemplates(),
+      activeToolGroups: (needSearch || needCalendar) ? { search: needSearch, calendar: needCalendar } : undefined,
     };
 
     const messages = buildMessages(promptCtx);
-
-    const tools: ToolDef[] = TOOL_DEFINITIONS as ToolDef[];
 
     try {
       // Tool-use loop: up to 3 rounds
       // rawItems accumulates function_call echoes + function_call_output for Responses API
       const rawItems: LLMRawInputItem[] = [];
-      let result = await callLLM(messages, tools);
+      const toolResults: string[] = []; // Collect tool outputs for fallback
+      // Use mini model for normal chat, full model for tool scenarios
+      const chatModel = tools ? undefined : (process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini');
+      let result = await callLLM(messages, tools, undefined, 60000, chatModel);
       let rounds = 0;
 
       while (result.toolCalls.length > 0 && rounds < 3) {
@@ -77,6 +96,7 @@ export class S3S4CognitiveGenerator implements PipelineStage {
         for (const tc of result.toolCalls) {
           logger.info(`S3S4: tool_call round=${rounds} name=${tc.name}`, { args: tc.arguments });
           const toolResult = await executeTool(tc.name, tc.arguments);
+          toolResults.push(toolResult);
 
           // Append function_call_output per Responses API spec
           rawItems.push({
@@ -85,8 +105,26 @@ export class S3S4CognitiveGenerator implements PipelineStage {
             output: toolResult,
           });
         }
-        result = await callLLM(messages, tools, rawItems);
+        try {
+          // Use lightweight prompt for subsequent rounds — no need to resend full persona/history
+          const followUpMessages: LLMMessage[] = [{
+            role: 'system',
+            content: '根据工具返回的结果，用自然语言完整回复用户。不要省略信息，不要缩写。保持你的人设语气。',
+          }];
+          result = await callLLM(followUpMessages, tools, rawItems, 90000);
+        } catch (retryErr) {
+          // LLM failed after tool execution — fallback to raw tool results
+          logger.warn('S3S4: LLM failed after tool call, using raw tool results', { error: String(retryErr) });
+          ctx.generatedResponse = toolResults.join('\n');
+          ctx.selectedModel = 'tool_fallback';
+          ctx.toolUsedInGeneration = true;
+          logger.info(`S3S4: tool_fallback (rounds=${rounds}, results=${toolResults.length})`);
+          return ctx;
+        }
       }
+
+      // Mark tool usage for downstream stages (S5 R04 skip)
+      if (rounds > 0) ctx.toolUsedInGeneration = true;
 
       // Handle [SKIP] — LLM decided not to reply (e.g. @mention to someone else)
       if (result.text.trim() === '[SKIP]') {
